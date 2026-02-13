@@ -11,6 +11,11 @@ Key behavior
 
 Outputs (repo-relative)
   ./SEAS5/baseline/<YYYY>/<MM>/lat{LAT:.3f}_lon{LON:.3f}_initYYYY-MM-01.csv
+
+Default points (if points.csv not found)
+- 1° x 1° grid cell centers covering:
+    lat 22–25, lon 120–122  (cell ranges)
+  => centers: lat 22.5,23.5,24.5 and lon 120.5,121.5 (6 points)
 """
 
 from __future__ import annotations
@@ -53,8 +58,17 @@ HORIZON_AHEAD_MONTHS = int(os.getenv("HORIZON_AHEAD_MONTHS", "4"))
 KEEP_BASELINE_MEMBERS = os.getenv("KEEP_BASELINE_MEMBERS", "0").strip() in ("1", "true", "True", "YES", "yes")
 
 # Points: if points.csv exists, it overrides DEFAULT_POINTS
-DEFAULT_POINTS: List[Tuple[float, float]] = [(23.0, 120.0)]  # (lat, lon)
 POINTS_FILE = Path(os.getenv("POINTS_FILE", "points.csv"))
+
+# Default Taiwan main-island bounding (cell ranges)
+# Interpreted as 1° cells:
+#   lat cells: [TAIWAN_LAT_MIN, TAIWAN_LAT_MAX)  -> centers at +0.5
+#   lon cells: [TAIWAN_LON_MIN, TAIWAN_LON_MAX)  -> centers at +0.5
+TAIWAN_LAT_MIN = float(os.getenv("TAIWAN_LAT_MIN", "22"))
+TAIWAN_LAT_MAX = float(os.getenv("TAIWAN_LAT_MAX", "25"))
+TAIWAN_LON_MIN = float(os.getenv("TAIWAN_LON_MIN", "120"))
+TAIWAN_LON_MAX = float(os.getenv("TAIWAN_LON_MAX", "122"))
+GRID_DEG = float(os.getenv("GRID_DEG", "1.0"))
 
 # Output root
 OUT_ROOT = Path(os.getenv("OUT_ROOT", "SEAS5")) / "baseline"
@@ -161,6 +175,62 @@ def write_cdsapirc_from_env() -> None:
         except Exception as e:
             last_err = e
     raise RuntimeError(f"Failed to write .cdsapirc: {last_err}")
+
+
+# =========================
+# Points helpers
+# =========================
+def build_default_taiwan_points() -> List[Tuple[float, float]]:
+    """
+    Build 1° grid cell centers.
+    Cell ranges:
+      lat: [TAIWAN_LAT_MIN, TAIWAN_LAT_MAX) step GRID_DEG
+      lon: [TAIWAN_LON_MIN, TAIWAN_LON_MAX) step GRID_DEG
+    centers: + GRID_DEG/2
+    """
+    lat_edges = np.arange(TAIWAN_LAT_MIN, TAIWAN_LAT_MAX, GRID_DEG)
+    lon_edges = np.arange(TAIWAN_LON_MIN, TAIWAN_LON_MAX, GRID_DEG)
+
+    lats = [float(x + GRID_DEG / 2.0) for x in lat_edges]
+    lons = [float(x + GRID_DEG / 2.0) for x in lon_edges]
+
+    pts = [(lat, lon) for lat in lats for lon in lons]
+    return pts
+
+def load_points() -> List[Tuple[float, float]]:
+    if POINTS_FILE.exists():
+        df = pd.read_csv(POINTS_FILE)
+        lat_col = "lat" if "lat" in df.columns else ("latitude" if "latitude" in df.columns else None)
+        lon_col = "lon" if "lon" in df.columns else ("longitude" if "longitude" in df.columns else None)
+        if lat_col is None or lon_col is None:
+            raise ValueError(f"{POINTS_FILE} must have columns lat/lon (or latitude/longitude)")
+        pts = [(float(r[lat_col]), float(r[lon_col])) for _, r in df.iterrows()]
+        if not pts:
+            raise ValueError(f"{POINTS_FILE} is empty.")
+        log(f"[POINTS] loaded {POINTS_FILE} n={len(pts)}")
+        return pts
+
+    pts = build_default_taiwan_points()
+    log(
+        "[POINTS] points.csv not found, using default Taiwan grid "
+        f"cell_range_lat=[{TAIWAN_LAT_MIN},{TAIWAN_LAT_MAX}) "
+        f"cell_range_lon=[{TAIWAN_LON_MIN},{TAIWAN_LON_MAX}) "
+        f"grid={GRID_DEG}deg -> n={len(pts)}"
+    )
+    if DEBUG:
+        log(f"[POINTS] first 10: {pts[:10]}")
+    return pts
+
+def point_tag(lat: float, lon: float) -> str:
+    return f"lat{lat:.3f}_lon{lon:.3f}"
+
+def area_from_cell_center(lat_c: float, lon_c: float, cell_deg: float = 1.0) -> List[float]:
+    """
+    Robustly request the whole 1° x 1° cell by bbox (not a zero-area bbox).
+    CDS expects: [North, West, South, East]
+    """
+    half = cell_deg / 2.0
+    return [lat_c + half, lon_c - half, lat_c - half, lon_c + half]
 
 
 # =========================
@@ -297,7 +367,7 @@ def to_daily_for_point(inst_nc: Path, tp_nc: Path, *, keep_members: bool) -> pd.
                               rh_pct_mean=("rh_pct_mean", "mean"),
                               wind_mps_mean=("wind_mps_mean", "mean"),
                               ens_n=("number", "nunique"),
-                              n6=("n6", "sum"),
+                              n6=("n6", "sum"),  # 注意：ensemble mean 情境下，這是加總，不能拿去跟 4 比
                           )
             )
         else:
@@ -367,22 +437,6 @@ def parse_init_months(s: str) -> List[int]:
         return list(range(a, b + 1))
     return [int(s)]
 
-def load_points() -> List[Tuple[float, float]]:
-    if POINTS_FILE.exists():
-        df = pd.read_csv(POINTS_FILE)
-        lat_col = "lat" if "lat" in df.columns else ("latitude" if "latitude" in df.columns else None)
-        lon_col = "lon" if "lon" in df.columns else ("longitude" if "longitude" in df.columns else None)
-        if lat_col is None or lon_col is None:
-            raise ValueError(f"{POINTS_FILE} must have columns lat/lon (or latitude/longitude)")
-        pts = [(float(r[lat_col]), float(r[lon_col])) for _, r in df.iterrows()]
-        if not pts:
-            raise ValueError(f"{POINTS_FILE} is empty.")
-        return pts
-    return DEFAULT_POINTS
-
-def point_tag(lat: float, lon: float) -> str:
-    return f"lat{lat:.3f}_lon{lon:.3f}"
-
 def build_paths(lat: float, lon: float, y: int, m: int) -> Tuple[Path, Path, Path]:
     out_dir = OUT_ROOT / f"{y:04d}" / f"{m:02d}"
     cache_dir = out_dir / "_cache_nc"
@@ -437,15 +491,43 @@ def save_daily_csv(df_daily: pd.DataFrame, out_csv: Path, *, init_date: date, en
 # Work planning
 # =========================
 def plan_tasks(year_min: int, year_max: int, init_months: List[int]) -> List[Tuple[int, int]]:
-    tasks = []
-    for y in range(year_min, year_max + 1):
-        for m in init_months:
-            tasks.append((y, m))
-    return tasks
+    return [(y, m) for y in range(year_min, year_max + 1) for m in init_months]
 
 def task_is_done(lat: float, lon: float, y: int, m: int) -> bool:
     out_csv, _, _ = build_paths(lat, lon, y, m)
     return out_csv.exists() and out_csv.stat().st_size > 0
+
+
+# =========================
+# Debug helpers
+# =========================
+def debug_check_daily(df_daily: pd.DataFrame, *, init_y: int, init_m: int, keep_members: bool):
+    """
+    1) lead_day 是否連續、是否缺天
+    2) 若 keep_members=True，檢查每個 member 每天是否 4 筆（6 小時資料）
+    """
+    if df_daily.empty or "lead_day" not in df_daily.columns:
+        log(f"[WARN] empty df_daily at init={init_y}-{init_m:02d}")
+        return
+
+    # lead_day continuity
+    lead_days = sorted(df_daily["lead_day"].unique().tolist())
+    min_d, max_d = int(min(lead_days)), int(max(lead_days))
+    expected = set(range(min_d, max_d + 1))
+    got = set(lead_days)
+    missing = sorted(expected - got)
+    if missing:
+        log(f"[WARN] missing lead_day at init={init_y}-{init_m:02d} (first 20): {missing[:20]}")
+    if DEBUG:
+        log(f"[DEBUG] lead_day range={min_d}..{max_d} n_unique={len(lead_days)} missing={len(missing)}")
+
+    # per-member n6 check only meaningful when keep_members=True
+    if keep_members and ("number" in df_daily.columns) and ("n6" in df_daily.columns):
+        chk = df_daily.groupby(["number", "lead_day"])["n6"].agg(["min", "max"])
+        weird = chk[(chk["min"] != 4) | (chk["max"] != 4)]
+        if len(weird) > 0:
+            log(f"[WARN] per-member n6 != 4 at init={init_y}-{init_m:02d} (first 10):")
+            log(str(weird.head(10)))
 
 
 # =========================
@@ -463,7 +545,11 @@ def run_one_init(client: "cdsapi.Client", *, lat: float, lon: float, y: int, m: 
     if should_stop_now():
         raise TimeoutError("Time budget almost exceeded; stop before starting a new init-month task.")
 
-    area = [lat, lon, lat, lon]
+    # Robust bbox: 1° cell around the center (lat,lon)
+    area = area_from_cell_center(lat, lon, cell_deg=GRID_DEG)
+    if DEBUG:
+        dlog(f"[DEBUG] area(N,W,S,E)={area} for point={point_tag(lat,lon)}")
+
     inst_leads = lead_hours_inst(init_date, end_date)
     tp_leads = lead_hours_tp(init_date, end_date)
 
@@ -477,13 +563,8 @@ def run_one_init(client: "cdsapi.Client", *, lat: float, lon: float, y: int, m: 
 
     df_daily = to_daily_for_point(inst_nc, tp_nc, keep_members=KEEP_BASELINE_MEMBERS)
 
-    # Optional debug: check 6-hour sampling counts
-    if DEBUG and "n6" in df_daily.columns:
-        chk = df_daily.groupby("lead_day")["n6"].agg(["min", "max"])
-        weird = chk[(chk["min"] < 4) | (chk["max"] > 4)]
-        if len(weird) > 0:
-            log(f"[WARN] n6 not always 4 at init={y}-{m:02d}-01 (first 10):")
-            log(str(weird.head(10)))
+    if DEBUG:
+        debug_check_daily(df_daily, init_y=y, init_m=m, keep_members=KEEP_BASELINE_MEMBERS)
 
     save_daily_csv(df_daily, out_csv, init_date=init_date, end_date=end_date, keep_members=KEEP_BASELINE_MEMBERS)
 
@@ -498,10 +579,8 @@ def main():
     write_cdsapirc_from_env()
     client = cdsapi.Client()
 
-    # Build a global task list; we will stop when time budget is nearly exceeded
     tasks = plan_tasks(BASELINE_YEAR_MIN, BASELINE_YEAR_MAX, init_months)
 
-    # Simple progress tracking file (optional)
     prog_file = OUT_ROOT / "_progress.txt"
     prog_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -513,6 +592,7 @@ def main():
                 done0 += 1
 
     log(f"[RUN] years={BASELINE_YEAR_MIN}..{BASELINE_YEAR_MAX} months={init_months} horizon_ahead={HORIZON_AHEAD_MONTHS} keep_members={KEEP_BASELINE_MEMBERS}")
+    log(f"[RUN] points={len(points)} total_tasks={total}")
     log(f"[RUN] time_budget={TIME_BUDGET_SEC}s grace={STOP_GRACE_SEC}s")
     log(f"[RUN] already_done={done0}/{total}  out={OUT_ROOT.resolve()}")
 
@@ -529,7 +609,6 @@ def main():
                 run_one_init(client, lat=lat, lon=lon, y=y, m=m)
                 done += 1
 
-                # Update progress file occasionally
                 if done % 5 == 0 or done == total:
                     prog_file.write_text(
                         f"done={done}/{total}\nleft_sec={int(time_left_sec())}\n",
@@ -542,7 +621,6 @@ def main():
             f"done={done}/{total}\nleft_sec={int(time_left_sec())}\nstatus=timeboxed\n",
             encoding="utf-8"
         )
-        # Exit 0 so Actions continues to commit/push partial results
         return
 
     prog_file.write_text(
