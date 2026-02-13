@@ -1,0 +1,74 @@
+name: seas5_baseline_timeboxed
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每月 10 號，日本時間 10:00 執行（01:00 UTC = 10:00 JST）
+    - cron: "0 1 10 * *"
+
+concurrency:
+  group: seas5-baseline
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install cdsapi xarray netCDF4 numpy pandas
+
+      - name: Build baseline (timeboxed)
+        env:
+          CDSAPI_URL: ${{ secrets.CDSAPI_URL }}
+          CDSAPI_KEY: ${{ secrets.CDSAPI_KEY }}
+
+          # baseline settings
+          BASELINE_YEAR_MIN: "2020"
+          BASELINE_YEAR_MAX: "2025"
+          INIT_MONTHS: "1-12"
+          HORIZON_AHEAD_MONTHS: "4"
+          OUT_ROOT: "SEAS5"
+
+          # timebox (5 hours)
+          TIME_BUDGET_SEC: "18000"
+          STOP_GRACE_SEC: "180"
+
+          DEBUG: "1"
+        run: |
+          python seas5_build_monthly_baseline_timeboxed.py
+
+      - name: Commit & push changes (if any)
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Add only data outputs you want tracked
+          git add SEAS5/baseline || true
+
+          # If no changes, exit cleanly
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Update SEAS5 baseline (timeboxed)"
+          git push
