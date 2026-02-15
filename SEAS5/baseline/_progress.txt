@@ -1,3 +1,3 @@
-done=50/432
-left_sec=144
+done=69/432
+left_sec=-645
 status=timeboxed
