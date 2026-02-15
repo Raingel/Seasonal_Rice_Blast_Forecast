@@ -44,7 +44,7 @@ STOP_GRACE_SEC = int(os.getenv("STOP_GRACE_SEC", "120"))           # keep some b
 # =========================
 # User settings (via env)
 # =========================
-BASELINE_YEAR_MIN = int(os.getenv("BASELINE_YEAR_MIN", "2020"))
+BASELINE_YEAR_MIN = int(os.getenv("BASELINE_YEAR_MIN", "2000"))
 BASELINE_YEAR_MAX = int(os.getenv("BASELINE_YEAR_MAX", "2025"))
 
 # Which init months to build. Examples: "1-12", "1,2,3", "2"
