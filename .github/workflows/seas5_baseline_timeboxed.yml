@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   schedule:
     # 每月 10 號，日本時間 10:00 執行（01:00 UTC = 10:00 JST）
-    - cron: "0 1 10 * *"
+    - cron: "0 0,6,12,18 * * *"
 
 concurrency:
   group: seas5-baseline
