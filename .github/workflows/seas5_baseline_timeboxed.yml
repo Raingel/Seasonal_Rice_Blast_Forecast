@@ -2,6 +2,15 @@ name: seas5_baseline_timeboxed
 
 on:
   workflow_dispatch:
+    inputs:
+      baseline_year_min:
+        description: "Baseline start year (inclusive)"
+        required: false
+        default: "2020"
+      baseline_year_max:
+        description: "Baseline end year (inclusive)"
+        required: false
+        default: "2025"
   schedule:
     # 每月 10 號，日本時間 10:00 執行（01:00 UTC = 10:00 JST）
     - cron: "0 0,6,12,18 * * *"
@@ -36,14 +45,20 @@ jobs:
           pip install "cdsapi>=0.7.7" xarray netCDF4 numpy pandas
 
 
+      - name: Show resolved parameters
+        run: |
+          echo "event=${{ github.event_name }}"
+          echo "BASELINE_YEAR_MIN=${{ github.event_name == 'workflow_dispatch' && inputs.baseline_year_min || '2020' }}"
+          echo "BASELINE_YEAR_MAX=${{ github.event_name == 'workflow_dispatch' && inputs.baseline_year_max || '2025' }}"
+
       - name: Build baseline (timeboxed)
         env:
           CDSAPI_URL: ${{ secrets.CDSAPI_URL }}
           CDSAPI_KEY: ${{ secrets.CDSAPI_KEY }}
 
-          # baseline settings
-          BASELINE_YEAR_MIN: "2020"
-          BASELINE_YEAR_MAX: "2025"
+          # baseline settings (manual trigger can override years)
+          BASELINE_YEAR_MIN: ${{ github.event_name == 'workflow_dispatch' && inputs.baseline_year_min || '2020' }}
+          BASELINE_YEAR_MAX: ${{ github.event_name == 'workflow_dispatch' && inputs.baseline_year_max || '2025' }}
           INIT_MONTHS: "1-12"
           HORIZON_AHEAD_MONTHS: "4"
           OUT_ROOT: "SEAS5"
