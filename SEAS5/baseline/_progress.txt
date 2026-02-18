@@ -1,3 +1,3 @@
-done=72/72
-left_sec=17998
-status=complete
+done=104/312
+left_sec=148
+status=timeboxed
