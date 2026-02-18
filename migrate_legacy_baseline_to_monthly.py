@@ -60,6 +60,32 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+
+
+def collapse_duplicate_rows(df: pd.DataFrame, key_cols: List[str]) -> pd.DataFrame:
+    """
+    Legacy per-point files can overlap in coverage (same lat/lon/lead_day).
+    Collapse duplicates deterministically so migration can proceed.
+
+    Strategy
+    - group by key columns
+    - numeric columns: mean
+    - non-numeric columns: first non-null value
+    """
+    if not df.duplicated(key_cols).any():
+        return df
+
+    value_cols = [c for c in df.columns if c not in key_cols]
+    numeric_cols = [c for c in value_cols if pd.api.types.is_numeric_dtype(df[c])]
+    other_cols = [c for c in value_cols if c not in numeric_cols]
+
+    agg = {c: "mean" for c in numeric_cols}
+    for c in other_cols:
+        agg[c] = lambda x: x.dropna().iloc[0] if not x.dropna().empty else pd.NA
+
+    collapsed = df.groupby(key_cols, as_index=False).agg(agg)
+    return collapsed
+
 def validate_month(df: pd.DataFrame, y: int, m: int, horizon_ahead_months: int) -> Tuple[int, int]:
     required_cols = {
         "latitude",
@@ -97,7 +123,10 @@ def validate_month(df: pd.DataFrame, y: int, m: int, horizon_ahead_months: int) 
 
     dup = df.duplicated(key_cols)
     if dup.any():
-        raise ValueError(f"{y}-{m:02d}: found duplicated rows for point/member/lead_day")
+        raise ValueError(
+            f"{y}-{m:02d}: duplicated rows still present after collapse; "
+            f"keys={key_cols}"
+        )
 
     points = (
         df[point_cols]
@@ -161,6 +190,17 @@ def main() -> int:
             frames.append(df)
 
         merged = pd.concat(frames, ignore_index=True)
+
+        key_cols = ["latitude", "longitude", "lead_day"]
+        if "number" in merged.columns:
+            key_cols = ["latitude", "longitude", "number", "lead_day"]
+
+        n_raw = len(merged)
+        merged = collapse_duplicate_rows(merged, key_cols=key_cols)
+        n_after = len(merged)
+        if n_after < n_raw:
+            print(f"[INFO] {y}-{m:02d}: deduplicated rows {n_raw} -> {n_after}")
+
         points, expected_days = validate_month(
             merged,
             y=y,
