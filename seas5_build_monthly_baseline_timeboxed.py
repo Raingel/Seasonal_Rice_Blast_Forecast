@@ -10,7 +10,7 @@ Key behavior
 - Safe exit: exits with code 0 even if unfinished, so GitHub Actions can commit/push partial progress
 
 Outputs (repo-relative)
-  ./SEAS5/baseline/<YYYY>/<MM>/lat{LAT:.3f}_lon{LON:.3f}_initYYYY-MM-01.csv
+  ./SEAS5/baseline/<YYYY>/<MM>/initYYYY-MM-01.csv (contains multiple lat/lon points)
 
 Default points (if points.csv not found)
 - 1° x 1° grid cell centers covering:
@@ -221,16 +221,24 @@ def load_points() -> List[Tuple[float, float]]:
         log(f"[POINTS] first 10: {pts[:10]}")
     return pts
 
-def point_tag(lat: float, lon: float) -> str:
-    return f"lat{lat:.3f}_lon{lon:.3f}"
-
-def area_from_cell_center(lat_c: float, lon_c: float, cell_deg: float = 1.0) -> List[float]:
+def area_from_points(points: List[Tuple[float, float]], cell_deg: float = 1.0) -> List[float]:
     """
-    Robustly request the whole 1° x 1° cell by bbox (not a zero-area bbox).
+    Build one request bbox covering all configured points.
+    Each point represents a grid-cell center, so extend by half-cell.
     CDS expects: [North, West, South, East]
     """
+    if not points:
+        raise ValueError("points is empty")
+
     half = cell_deg / 2.0
-    return [lat_c + half, lon_c - half, lat_c - half, lon_c + half]
+    lats = [lat for lat, _ in points]
+    lons = [lon for _, lon in points]
+    north = max(lats) + half
+    west = min(lons) - half
+    south = min(lats) - half
+    east = max(lons) + half
+    return [north, west, south, east]
+
 
 
 # =========================
@@ -320,7 +328,12 @@ def pick_var(ds: xr.Dataset, candidates: List[str]) -> str:
             return c
     raise KeyError(f"None of {candidates} found. Vars={list(ds.data_vars)}")
 
-def to_daily_for_point(inst_nc: Path, tp_nc: Path, *, keep_members: bool) -> pd.DataFrame:
+def to_daily_for_month(
+    inst_nc: Path,
+    tp_nc: Path,
+    *,
+    keep_members: bool,
+) -> pd.DataFrame:
     ds_inst = xr.open_dataset(inst_nc)
     ds_tp = xr.open_dataset(tp_nc)
 
@@ -437,17 +450,15 @@ def parse_init_months(s: str) -> List[int]:
         return list(range(a, b + 1))
     return [int(s)]
 
-def build_paths(lat: float, lon: float, y: int, m: int) -> Tuple[Path, Path, Path]:
+def build_paths(y: int, m: int) -> Tuple[Path, Path, Path]:
     out_dir = OUT_ROOT / f"{y:04d}" / f"{m:02d}"
     cache_dir = out_dir / "_cache_nc"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    pfx = point_tag(lat, lon)
-    out_csv = out_dir / f"{pfx}_init{y:04d}-{m:02d}-01.csv"
-    inst_nc = cache_dir / f"{pfx}_init{y:04d}-{m:02d}-01_inst.nc"
-    tp_nc = cache_dir / f"{pfx}_init{y:04d}-{m:02d}-01_tp.nc"
+    out_csv = out_dir / f"init{y:04d}-{m:02d}-01.csv"
+    inst_nc = cache_dir / f"init{y:04d}-{m:02d}-01_inst.nc"
+    tp_nc = cache_dir / f"init{y:04d}-{m:02d}-01_tp.nc"
     return out_csv, inst_nc, tp_nc
-
 def save_daily_csv(df_daily: pd.DataFrame, out_csv: Path, *, init_date: date, end_date: date, keep_members: bool):
     out_csv.parent.mkdir(parents=True, exist_ok=True)
 
@@ -493,14 +504,9 @@ def save_daily_csv(df_daily: pd.DataFrame, out_csv: Path, *, init_date: date, en
 def plan_tasks(year_min: int, year_max: int, init_months: List[int]) -> List[Tuple[int, int]]:
     return [(y, m) for y in range(year_min, year_max + 1) for m in init_months]
 
-def task_is_done(lat: float, lon: float, y: int, m: int) -> bool:
-    out_csv, _, _ = build_paths(lat, lon, y, m)
+def task_is_done(y: int, m: int) -> bool:
+    out_csv, _, _ = build_paths(y, m)
     return out_csv.exists() and out_csv.stat().st_size > 0
-
-
-# =========================
-# Debug helpers
-# =========================
 def debug_check_daily(df_daily: pd.DataFrame, *, init_y: int, init_m: int, keep_members: bool):
     """
     1) lead_day 是否連續、是否缺天
@@ -533,11 +539,11 @@ def debug_check_daily(df_daily: pd.DataFrame, *, init_y: int, init_m: int, keep_
 # =========================
 # Main
 # =========================
-def run_one_init(client: "cdsapi.Client", *, lat: float, lon: float, y: int, m: int):
+def run_one_init(client: "cdsapi.Client", *, points: List[Tuple[float, float]], y: int, m: int):
     init_date = date(y, m, 1)
     end_date = horizon_end_date(y, m, HORIZON_AHEAD_MONTHS)
 
-    out_csv, inst_nc, tp_nc = build_paths(lat, lon, y, m)
+    out_csv, inst_nc, tp_nc = build_paths(y, m)
     if out_csv.exists() and out_csv.stat().st_size > 0:
         dlog(f"[skip] {out_csv}")
         return
@@ -545,10 +551,9 @@ def run_one_init(client: "cdsapi.Client", *, lat: float, lon: float, y: int, m: 
     if should_stop_now():
         raise TimeoutError("Time budget almost exceeded; stop before starting a new init-month task.")
 
-    # Robust bbox: 1° cell around the center (lat,lon)
-    area = area_from_cell_center(lat, lon, cell_deg=GRID_DEG)
+    area = area_from_points(points, cell_deg=GRID_DEG)
     if DEBUG:
-        dlog(f"[DEBUG] area(N,W,S,E)={area} for point={point_tag(lat,lon)}")
+        dlog(f"[DEBUG] area(N,W,S,E)={area} for all points n={len(points)}")
 
     inst_leads = lead_hours_inst(init_date, end_date)
     tp_leads = lead_hours_tp(init_date, end_date)
@@ -556,19 +561,21 @@ def run_one_init(client: "cdsapi.Client", *, lat: float, lon: float, y: int, m: 
     req_inst = build_request(y, m, inst_leads, INST_VARIABLES, area)
     req_tp = build_request(y, m, tp_leads, PRECIP_VARIABLE, area)
 
-    log(f"[DL] {point_tag(lat,lon)} init={y}-{m:02d}-01 end={end_date.isoformat()} members={'ALL' if KEEP_BASELINE_MEMBERS else 'MEAN'} left={int(time_left_sec())}s")
+    log(f"[DL] all-points init={y}-{m:02d}-01 end={end_date.isoformat()} members={'ALL' if KEEP_BASELINE_MEMBERS else 'MEAN'} left={int(time_left_sec())}s")
 
     retrieve_with_retry(client, DATASET, req_inst, inst_nc)
     retrieve_with_retry(client, DATASET, req_tp, tp_nc)
 
-    df_daily = to_daily_for_point(inst_nc, tp_nc, keep_members=KEEP_BASELINE_MEMBERS)
+    df_daily = to_daily_for_month(
+        inst_nc,
+        tp_nc,
+        keep_members=KEEP_BASELINE_MEMBERS,
+    )
 
     if DEBUG:
         debug_check_daily(df_daily, init_y=y, init_m=m, keep_members=KEEP_BASELINE_MEMBERS)
 
     save_daily_csv(df_daily, out_csv, init_date=init_date, end_date=end_date, keep_members=KEEP_BASELINE_MEMBERS)
-
-
 def main():
     if BASELINE_YEAR_MIN > BASELINE_YEAR_MAX:
         raise ValueError("BASELINE_YEAR_MIN must be <= BASELINE_YEAR_MAX")
@@ -584,36 +591,34 @@ def main():
     prog_file = OUT_ROOT / "_progress.txt"
     prog_file.parent.mkdir(parents=True, exist_ok=True)
 
-    total = len(tasks) * len(points)
+    total = len(tasks)
     done0 = 0
-    for lat, lon in points:
-        for (y, m) in tasks:
-            if task_is_done(lat, lon, y, m):
-                done0 += 1
+    for (y, m) in tasks:
+        if task_is_done(y, m):
+            done0 += 1
 
     log(f"[RUN] years={BASELINE_YEAR_MIN}..{BASELINE_YEAR_MAX} months={init_months} horizon_ahead={HORIZON_AHEAD_MONTHS} keep_members={KEEP_BASELINE_MEMBERS}")
-    log(f"[RUN] points={len(points)} total_tasks={total}")
+    log(f"[RUN] points={len(points)} total_tasks={total} (one file per init month)")
     log(f"[RUN] time_budget={TIME_BUDGET_SEC}s grace={STOP_GRACE_SEC}s")
     log(f"[RUN] already_done={done0}/{total}  out={OUT_ROOT.resolve()}")
 
     done = done0
     try:
-        for lat, lon in points:
-            for (y, m) in tasks:
-                if task_is_done(lat, lon, y, m):
-                    continue
+        for (y, m) in tasks:
+            if task_is_done(y, m):
+                continue
 
-                if should_stop_now():
-                    raise TimeoutError("Reached time budget.")
+            if should_stop_now():
+                raise TimeoutError("Reached time budget.")
 
-                run_one_init(client, lat=lat, lon=lon, y=y, m=m)
-                done += 1
+            run_one_init(client, points=points, y=y, m=m)
+            done += 1
 
-                if done % 5 == 0 or done == total:
-                    prog_file.write_text(
-                        f"done={done}/{total}\nleft_sec={int(time_left_sec())}\n",
-                        encoding="utf-8"
-                    )
+            if done % 5 == 0 or done == total:
+                prog_file.write_text(
+                    f"done={done}/{total}\nleft_sec={int(time_left_sec())}\n",
+                    encoding="utf-8"
+                )
 
     except TimeoutError as e:
         log(f"[TIMEBOX] stop: {e}")

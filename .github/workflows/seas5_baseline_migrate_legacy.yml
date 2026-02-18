@@ -1,0 +1,66 @@
+name: seas5_baseline_migrate_legacy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "MIGRATE" to run one-time validation + rename'
+        required: true
+        default: ""
+      horizon_ahead_months:
+        description: "Horizon ahead months (should match baseline build config)"
+        required: false
+        default: "4"
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Guard: explicit confirmation required
+        run: |
+          if [ "${{ inputs.confirm }}" != "MIGRATE" ]; then
+            echo 'Please set input confirm=MIGRATE to continue.'
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas
+
+      - name: Validate + migrate legacy files to monthly files
+        run: |
+          python migrate_legacy_baseline_to_monthly.py \
+            --root SEAS5/baseline \
+            --horizon-ahead-months "${{ inputs.horizon_ahead_months }}"
+
+      - name: Commit & push changes (if any)
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add SEAS5/baseline migrate_legacy_baseline_to_monthly.py .github/workflows/seas5_baseline_migrate_legacy.yml || true
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Migrate legacy SEAS5 baseline files to monthly format"
+          git push
