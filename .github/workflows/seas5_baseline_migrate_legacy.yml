@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - name: Guard: explicit confirmation required
+      - name: "Guard: explicit confirmation required"
         run: |
           if [ "${{ inputs.confirm }}" != "MIGRATE" ]; then
             echo 'Please set input confirm=MIGRATE to continue.'
