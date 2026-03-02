@@ -50,8 +50,9 @@
 是，代表目前 baseline 需要補欄位。
 
 本 repo 已新增：
-- `backfill_baseline_extrema_timeboxed.py`：從每月 `_cache_nc/initYYYY-MM-01_inst.nc` 回填
-  `rh_pct_max/rh_pct_min/wind_mps_max/wind_mps_min` 到既有 baseline CSV。
+- `backfill_baseline_extrema_timeboxed.py`：從每月 cache 回填
+  `rh_pct_max/rh_pct_min/wind_mps_max/wind_mps_min` 到既有 baseline CSV，
+  同時支援新式整月 cache（`initYYYY-MM-01_inst.nc`）與舊式 per-point cache（`lat*_lon*_init..._inst.nc`）。
 - `.github/workflows/backfill-baseline-extrema.yml`：每 4 小時自動跑一次，
   time-box 5 小時，可中斷續跑，直到全部月份補齊。
 

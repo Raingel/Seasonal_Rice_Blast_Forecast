@@ -9,13 +9,17 @@ Purpose
 Design
 - Resumable: skip files already containing all target columns (non-empty)
 - Timeboxed: stop gracefully after TIME_BUDGET_SEC (default 5h)
-- Source of truth: each month's cached inst nc file under
-  SEAS5/baseline/<YYYY>/<MM>/_cache_nc/initYYYY-MM-01_inst.nc
+- Safe mapping only: fill rows only when keys (latitude, longitude, lead_day) match
+  after normalization; never use nearest-neighbor assignment.
+- Supports both cache layouts:
+  1) merged monthly cache: _cache_nc/initYYYY-MM-01_inst.nc
+  2) legacy per-point cache: _cache_nc/lat*_lon*_initYYYY-MM-01_inst.nc
 """
 
 from __future__ import annotations
 
 import os
+import re
 import time
 from pathlib import Path
 from typing import List, Tuple
@@ -25,9 +29,6 @@ import pandas as pd
 import xarray as xr
 
 
-# =========================
-# Config (env)
-# =========================
 BASELINE_ROOT = Path(os.getenv("BASELINE_ROOT", "SEAS5/baseline"))
 YEAR_MIN = int(os.getenv("BASELINE_YEAR_MIN", "2000"))
 YEAR_MAX = int(os.getenv("BASELINE_YEAR_MAX", "2025"))
@@ -40,10 +41,10 @@ DEBUG = os.getenv("DEBUG", "0").strip() in ("1", "true", "True", "yes", "YES")
 TARGET_COLS = ["rh_pct_max", "rh_pct_min", "wind_mps_max", "wind_mps_min"]
 KEY_ROUND_DP = int(os.getenv("KEY_ROUND_DP", "3"))
 
+LEGACY_POINT_RE = re.compile(
+    r"lat(?P<lat>-?\d+(?:\.\d+)?)_lon(?P<lon>-?\d+(?:\.\d+)?)_init\d{4}-\d{2}-01_inst\.nc$"
+)
 
-# =========================
-# Logging/time helpers
-# =========================
 t0 = time.time()
 
 
@@ -64,9 +65,6 @@ def should_stop_now() -> bool:
     return time_left_sec() <= STOP_GRACE_SEC
 
 
-# =========================
-# Shared physics/helpers
-# =========================
 def rh_from_t_td_c(t_c: pd.Series, td_c: pd.Series) -> pd.Series:
     a, b = 17.625, 243.04
     es = 6.1094 * np.exp(a * t_c / (b + t_c))
@@ -115,9 +113,6 @@ def get_init_time(df: pd.DataFrame) -> pd.Timestamp:
     raise KeyError("cannot find init time column (time or forecast_reference_time)")
 
 
-# =========================
-# Task helpers
-# =========================
 def parse_init_months(s: str) -> List[int]:
     s = s.strip()
     if "," in s:
@@ -136,11 +131,26 @@ def plan_tasks() -> List[Tuple[int, int]]:
     return [(y, m) for y in range(YEAR_MIN, YEAR_MAX + 1) for m in months]
 
 
+def month_dir(y: int, m: int) -> Path:
+    return BASELINE_ROOT / f"{y:04d}" / f"{m:02d}"
+
+
 def month_paths(y: int, m: int) -> Tuple[Path, Path]:
-    month_dir = BASELINE_ROOT / f"{y:04d}" / f"{m:02d}"
-    csv_fp = month_dir / f"init{y:04d}-{m:02d}-01.csv"
-    inst_nc = month_dir / "_cache_nc" / f"init{y:04d}-{m:02d}-01_inst.nc"
+    d = month_dir(y, m)
+    csv_fp = d / f"init{y:04d}-{m:02d}-01.csv"
+    inst_nc = d / "_cache_nc" / f"init{y:04d}-{m:02d}-01_inst.nc"
     return csv_fp, inst_nc
+
+
+def list_inst_cache_files(y: int, m: int) -> List[Path]:
+    _, generic = month_paths(y, m)
+    if generic.exists():
+        return [generic]
+    d = month_dir(y, m) / "_cache_nc"
+    if not d.exists():
+        return []
+    pats = sorted(d.glob(f"lat*_lon*_init{y:04d}-{m:02d}-01_inst.nc"))
+    return pats
 
 
 def needs_backfill(df: pd.DataFrame) -> bool:
@@ -153,7 +163,6 @@ def needs_backfill(df: pd.DataFrame) -> bool:
 
 
 def normalize_merge_keys(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize join keys to avoid float precision mismatches across csv/nc sources."""
     out = df.copy()
     out["latitude"] = pd.to_numeric(out["latitude"], errors="coerce").round(KEY_ROUND_DP)
     out["longitude"] = pd.to_numeric(out["longitude"], errors="coerce").round(KEY_ROUND_DP)
@@ -210,32 +219,86 @@ def extrema_from_inst_nc(inst_nc: Path) -> pd.DataFrame:
             )
         )
 
-    return daily
+    return normalize_merge_keys(daily)
+
+
+def parse_lat_lon_from_legacy_name(path: Path) -> Tuple[float, float] | None:
+    m = LEGACY_POINT_RE.search(path.name)
+    if not m:
+        return None
+    return float(m.group("lat")), float(m.group("lon"))
+
+
+def restrict_to_legacy_point(ext: pd.DataFrame, inst_path: Path) -> pd.DataFrame:
+    parsed = parse_lat_lon_from_legacy_name(inst_path)
+    if parsed is None:
+        return ext
+
+    plat, plon = parsed
+    plat = round(plat, KEY_ROUND_DP)
+    plon = round(plon, KEY_ROUND_DP)
+
+    sel = ext[(ext["latitude"] == plat) & (ext["longitude"] == plon)].copy()
+    if sel.empty:
+        # Do not force nearest assignment to avoid any risk of wrong-point fill.
+        dlog(f"[DEBUG] legacy point not found in nc grid: file={inst_path.name} target=({plat},{plon})")
+        return ext.iloc[0:0].copy()
+    return sel
+
+
+def collect_extrema_for_month(y: int, m: int) -> Tuple[pd.DataFrame, str]:
+    files = list_inst_cache_files(y, m)
+    if not files:
+        return pd.DataFrame(columns=["latitude", "longitude", "lead_day", *TARGET_COLS]), "missing_cache"
+
+    parts: List[pd.DataFrame] = []
+    mode = "generic" if len(files) == 1 and files[0].name.startswith("init") else "legacy_points"
+    for f in files:
+        ext = extrema_from_inst_nc(f)
+        if f.name.startswith("lat"):
+            ext = restrict_to_legacy_point(ext, f)
+        if not ext.empty:
+            parts.append(ext)
+
+    if not parts:
+        return pd.DataFrame(columns=["latitude", "longitude", "lead_day", *TARGET_COLS]), "no_overlap"
+
+    all_ext = pd.concat(parts, ignore_index=True)
+    all_ext = all_ext.groupby(["latitude", "longitude", "lead_day"], as_index=False).agg(
+        rh_pct_max=("rh_pct_max", "mean"),
+        rh_pct_min=("rh_pct_min", "mean"),
+        wind_mps_max=("wind_mps_max", "mean"),
+        wind_mps_min=("wind_mps_min", "mean"),
+    )
+    return all_ext, mode
 
 
 def run_one(y: int, m: int) -> str:
-    csv_fp, inst_nc = month_paths(y, m)
+    csv_fp, _ = month_paths(y, m)
     if not csv_fp.exists():
         return "missing_csv"
 
-    df = pd.read_csv(csv_fp)
-    if df.empty:
+    df_raw = pd.read_csv(csv_fp)
+    if df_raw.empty:
         return "empty_csv"
-    if not needs_backfill(df):
+    if not needs_backfill(df_raw):
         return "skip_done"
-    if not inst_nc.exists():
+
+    ext, ext_status = collect_extrema_for_month(y, m)
+    if ext_status == "missing_cache":
         return "missing_cache"
 
-    ext = extrema_from_inst_nc(inst_nc)
+    df_keys = normalize_merge_keys(df_raw[["latitude", "longitude", "lead_day"]])
+    overlap = pd.merge(df_keys.drop_duplicates(), ext[["latitude", "longitude", "lead_day"]], on=["latitude", "longitude", "lead_day"], how="inner")
+    if overlap.empty:
+        dlog(f"[DEBUG] no overlap y={y} m={m:02d} ext_status={ext_status}")
+        return "no_overlap"
 
-    df = normalize_merge_keys(df)
-    ext = normalize_merge_keys(ext)
-
-    on_cols = ["latitude", "longitude", "lead_day"]
-    merged = df.merge(ext, on=on_cols, how="left", suffixes=("", "_new"))
+    df = normalize_merge_keys(df_raw)
+    merged = df.merge(ext, on=["latitude", "longitude", "lead_day"], how="left", suffixes=("", "_new"))
 
     for c in TARGET_COLS:
-        if c in df.columns:
+        if c in df_raw.columns:
             merged[c] = merged[c].where(merged[c].notna(), merged.get(f"{c}_new"))
             if f"{c}_new" in merged.columns:
                 merged = merged.drop(columns=[f"{c}_new"])
@@ -244,27 +307,21 @@ def run_one(y: int, m: int) -> str:
             if f"{c}_new" in merged.columns:
                 merged = merged.drop(columns=[f"{c}_new"])
 
-    # keep legacy style column ordering by appending new cols at end only when absent
-    ordered_cols = list(df.columns)
+    if len(merged) != len(df_raw):
+        raise ValueError(f"row count changed unexpectedly: {csv_fp} {len(df_raw)}->{len(merged)}")
+
+    for c in TARGET_COLS:
+        # Require at least one filled value and never overwrite existing non-null with null.
+        if merged[c].notna().sum() == 0:
+            return "no_overlap"
+
+    ordered_cols = list(df_raw.columns)
     for c in TARGET_COLS:
         if c not in ordered_cols:
             ordered_cols.append(c)
-    merged = merged[ordered_cols]
 
-    # basic integrity check
-    if len(merged) != len(df):
-        raise ValueError(f"row count changed unexpectedly: {csv_fp} {len(df)}->{len(merged)}")
-
-    min_non_null = min(int(merged[c].notna().sum()) for c in TARGET_COLS)
-    if min_non_null == 0:
-        dlog(
-            f"[DEBUG] no overlap? csv keys sample="
-            f"{df[['latitude','longitude','lead_day']].drop_duplicates().head(3).to_dict('records')} "
-            f"ext keys sample={ext[['latitude','longitude','lead_day']].drop_duplicates().head(3).to_dict('records')}"
-        )
-        return "no_overlap"
-
-    merged.to_csv(csv_fp, index=False)
+    out = merged[ordered_cols].copy()
+    out.to_csv(csv_fp, index=False)
     return "updated"
 
 
