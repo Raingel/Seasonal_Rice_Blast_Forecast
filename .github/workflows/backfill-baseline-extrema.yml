@@ -38,6 +38,7 @@ jobs:
           TIME_BUDGET_SEC: "18000"   # 5h
           STOP_GRACE_SEC: "120"
           DEBUG: "0"
+          KEY_ROUND_DP: "3"
         run: python backfill_baseline_extrema_timeboxed.py
 
       - name: Commit and push if changed

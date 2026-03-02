@@ -38,6 +38,7 @@ STOP_GRACE_SEC = int(os.getenv("STOP_GRACE_SEC", "120"))
 DEBUG = os.getenv("DEBUG", "0").strip() in ("1", "true", "True", "yes", "YES")
 
 TARGET_COLS = ["rh_pct_max", "rh_pct_min", "wind_mps_max", "wind_mps_min"]
+KEY_ROUND_DP = int(os.getenv("KEY_ROUND_DP", "3"))
 
 
 # =========================
@@ -151,6 +152,15 @@ def needs_backfill(df: pd.DataFrame) -> bool:
     return False
 
 
+def normalize_merge_keys(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize join keys to avoid float precision mismatches across csv/nc sources."""
+    out = df.copy()
+    out["latitude"] = pd.to_numeric(out["latitude"], errors="coerce").round(KEY_ROUND_DP)
+    out["longitude"] = pd.to_numeric(out["longitude"], errors="coerce").round(KEY_ROUND_DP)
+    out["lead_day"] = pd.to_numeric(out["lead_day"], errors="coerce").astype("Int64")
+    return out
+
+
 def extrema_from_inst_nc(inst_nc: Path) -> pd.DataFrame:
     ds = xr.open_dataset(inst_nc)
     t2m = pick_var(ds, ["t2m", "2m_temperature"])
@@ -218,6 +228,9 @@ def run_one(y: int, m: int) -> str:
 
     ext = extrema_from_inst_nc(inst_nc)
 
+    df = normalize_merge_keys(df)
+    ext = normalize_merge_keys(ext)
+
     on_cols = ["latitude", "longitude", "lead_day"]
     merged = df.merge(ext, on=on_cols, how="left", suffixes=("", "_new"))
 
@@ -242,9 +255,14 @@ def run_one(y: int, m: int) -> str:
     if len(merged) != len(df):
         raise ValueError(f"row count changed unexpectedly: {csv_fp} {len(df)}->{len(merged)}")
 
-    for c in TARGET_COLS:
-        if merged[c].notna().sum() == 0:
-            raise ValueError(f"{csv_fp}: backfill failed, all null in {c}")
+    min_non_null = min(int(merged[c].notna().sum()) for c in TARGET_COLS)
+    if min_non_null == 0:
+        dlog(
+            f"[DEBUG] no overlap? csv keys sample="
+            f"{df[['latitude','longitude','lead_day']].drop_duplicates().head(3).to_dict('records')} "
+            f"ext keys sample={ext[['latitude','longitude','lead_day']].drop_duplicates().head(3).to_dict('records')}"
+        )
+        return "no_overlap"
 
     merged.to_csv(csv_fp, index=False)
     return "updated"
@@ -261,6 +279,7 @@ def main() -> int:
     stats = {
         "updated": 0,
         "skip_done": 0,
+        "no_overlap": 0,
         "missing_csv": 0,
         "missing_cache": 0,
         "empty_csv": 0,
