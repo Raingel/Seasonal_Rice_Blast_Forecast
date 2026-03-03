@@ -19,7 +19,6 @@ Design
 from __future__ import annotations
 
 import os
-import re
 import time
 from pathlib import Path
 from typing import List, Tuple
@@ -43,9 +42,6 @@ KEY_ROUND_DP = int(os.getenv("KEY_ROUND_DP", "3"))
 LOG_FIRST_N_NO_OVERLAP = int(os.getenv("LOG_FIRST_N_NO_OVERLAP", "20"))
 DIAG_OUT_CSV = os.getenv("DIAG_OUT_CSV", "").strip()
 
-LEGACY_POINT_RE = re.compile(
-    r"lat(?P<lat>-?\d+(?:\.\d+)?)_lon(?P<lon>-?\d+(?:\.\d+)?)_init\d{4}-\d{2}-01_inst\.nc$"
-)
 
 t0 = time.time()
 
@@ -224,30 +220,6 @@ def extrema_from_inst_nc(inst_nc: Path) -> pd.DataFrame:
     return normalize_merge_keys(daily)
 
 
-def parse_lat_lon_from_legacy_name(path: Path) -> Tuple[float, float] | None:
-    m = LEGACY_POINT_RE.search(path.name)
-    if not m:
-        return None
-    return float(m.group("lat")), float(m.group("lon"))
-
-
-def restrict_to_legacy_point(ext: pd.DataFrame, inst_path: Path) -> pd.DataFrame:
-    parsed = parse_lat_lon_from_legacy_name(inst_path)
-    if parsed is None:
-        return ext
-
-    plat, plon = parsed
-    plat = round(plat, KEY_ROUND_DP)
-    plon = round(plon, KEY_ROUND_DP)
-
-    sel = ext[(ext["latitude"] == plat) & (ext["longitude"] == plon)].copy()
-    if sel.empty:
-        # Do not force nearest assignment to avoid any risk of wrong-point fill.
-        dlog(f"[DEBUG] legacy point not found in nc grid: file={inst_path.name} target=({plat},{plon})")
-        return ext.iloc[0:0].copy()
-    return sel
-
-
 def collect_extrema_for_month(y: int, m: int) -> Tuple[pd.DataFrame, str]:
     files = list_inst_cache_files(y, m)
     if not files:
@@ -257,8 +229,9 @@ def collect_extrema_for_month(y: int, m: int) -> Tuple[pd.DataFrame, str]:
     mode = "generic" if len(files) == 1 and files[0].name.startswith("init") else "legacy_points"
     for f in files:
         ext = extrema_from_inst_nc(f)
-        if f.name.startswith("lat"):
-            ext = restrict_to_legacy_point(ext, f)
+        # For legacy per-point caches, keep all grid rows from each file.
+        # These files were produced from boxed-area requests and can overlap;
+        # we aggregate by (lat, lon, lead_day) below to match baseline merge behavior.
         if not ext.empty:
             parts.append(ext)
 
