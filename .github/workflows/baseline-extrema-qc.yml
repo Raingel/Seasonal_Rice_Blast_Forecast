@@ -1,0 +1,61 @@
+name: Baseline extrema QA
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_missing_col_files:
+        description: "Allowed files still missing extrema columns"
+        required: false
+        default: "0"
+      max_null_extrema_rows:
+        description: "Allowed rows with null extrema"
+        required: false
+        default: "0"
+      max_bad_order_rows:
+        description: "Allowed rows violating min<=mean<=max"
+        required: false
+        default: "0"
+      max_bad_rh_range_rows:
+        description: "Allowed RH out-of-range rows"
+        required: false
+        default: "0"
+      max_neg_wind_rows:
+        description: "Allowed negative wind rows"
+        required: false
+        default: "0"
+      max_continuity_gap_groups:
+        description: "Allowed point-groups with lead_day gaps"
+        required: false
+        default: "0"
+      min_neighbor_pair_corr:
+        description: "Lower bound for neighbor t2m pair min corr (if enough pairs)"
+        required: false
+        default: "0.3"
+      min_neighbor_pair_count:
+        description: "Only enforce correlation bound if pair count >= this"
+        required: false
+        default: "10"
+
+jobs:
+  qc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run baseline extrema QA
+        env:
+          MAX_MISSING_COL_FILES: ${{ inputs.max_missing_col_files }}
+          MAX_NULL_EXTREMA_ROWS: ${{ inputs.max_null_extrema_rows }}
+          MAX_BAD_ORDER_ROWS: ${{ inputs.max_bad_order_rows }}
+          MAX_BAD_RH_RANGE_ROWS: ${{ inputs.max_bad_rh_range_rows }}
+          MAX_NEG_WIND_ROWS: ${{ inputs.max_neg_wind_rows }}
+          MAX_CONTINUITY_GAP_GROUPS: ${{ inputs.max_continuity_gap_groups }}
+          MIN_NEIGHBOR_PAIR_CORR: ${{ inputs.min_neighbor_pair_corr }}
+          MIN_NEIGHBOR_PAIR_COUNT: ${{ inputs.min_neighbor_pair_count }}
+        run: python qa_extrema_backfill_check.py
