@@ -40,6 +40,8 @@ DEBUG = os.getenv("DEBUG", "0").strip() in ("1", "true", "True", "yes", "YES")
 
 TARGET_COLS = ["rh_pct_max", "rh_pct_min", "wind_mps_max", "wind_mps_min"]
 KEY_ROUND_DP = int(os.getenv("KEY_ROUND_DP", "3"))
+LOG_FIRST_N_NO_OVERLAP = int(os.getenv("LOG_FIRST_N_NO_OVERLAP", "20"))
+DIAG_OUT_CSV = os.getenv("DIAG_OUT_CSV", "").strip()
 
 LEGACY_POINT_RE = re.compile(
     r"lat(?P<lat>-?\d+(?:\.\d+)?)_lon(?P<lon>-?\d+(?:\.\d+)?)_init\d{4}-\d{2}-01_inst\.nc$"
@@ -273,26 +275,58 @@ def collect_extrema_for_month(y: int, m: int) -> Tuple[pd.DataFrame, str]:
     return all_ext, mode
 
 
-def run_one(y: int, m: int) -> str:
+def overlap_count(df_keys: pd.DataFrame, ext_keys: pd.DataFrame, lat_shift: float = 0.0, lon_shift: float = 0.0) -> int:
+    if ext_keys.empty or df_keys.empty:
+        return 0
+    e = ext_keys.copy()
+    e["latitude"] = (e["latitude"] + lat_shift).round(KEY_ROUND_DP)
+    e["longitude"] = (e["longitude"] + lon_shift).round(KEY_ROUND_DP)
+    ov = pd.merge(
+        df_keys.drop_duplicates(),
+        e.drop_duplicates(),
+        on=["latitude", "longitude", "lead_day"],
+        how="inner",
+    )
+    return int(len(ov))
+
+
+def no_overlap_diagnostic(y: int, m: int, ext_status: str, df_keys: pd.DataFrame, ext_keys: pd.DataFrame) -> dict:
+    diag = {
+        "year": y,
+        "month": m,
+        "ext_status": ext_status,
+        "csv_unique_keys": int(len(df_keys.drop_duplicates())),
+        "ext_unique_keys": int(len(ext_keys.drop_duplicates())),
+    }
+    shifts = [0.0, 0.5, -0.5, 1.0, -1.0]
+    for ds in shifts:
+        diag[f"overlap_lat{ds:+.1f}_lon0.0"] = overlap_count(df_keys, ext_keys, lat_shift=ds, lon_shift=0.0)
+        diag[f"overlap_lat0.0_lon{ds:+.1f}"] = overlap_count(df_keys, ext_keys, lat_shift=0.0, lon_shift=ds)
+    diag["csv_sample"] = df_keys.drop_duplicates().head(3).to_dict("records")
+    diag["ext_sample"] = ext_keys.drop_duplicates().head(3).to_dict("records")
+    return diag
+
+
+def run_one(y: int, m: int) -> Tuple[str, dict | None]:
     csv_fp, _ = month_paths(y, m)
     if not csv_fp.exists():
-        return "missing_csv"
+        return "missing_csv", None
 
     df_raw = pd.read_csv(csv_fp)
     if df_raw.empty:
-        return "empty_csv"
+        return "empty_csv", None
     if not needs_backfill(df_raw):
-        return "skip_done"
+        return "skip_done", None
 
     ext, ext_status = collect_extrema_for_month(y, m)
     if ext_status == "missing_cache":
-        return "missing_cache"
+        return "missing_cache", None
 
     df_keys = normalize_merge_keys(df_raw[["latitude", "longitude", "lead_day"]])
     overlap = pd.merge(df_keys.drop_duplicates(), ext[["latitude", "longitude", "lead_day"]], on=["latitude", "longitude", "lead_day"], how="inner")
     if overlap.empty:
         dlog(f"[DEBUG] no overlap y={y} m={m:02d} ext_status={ext_status}")
-        return "no_overlap"
+        return "no_overlap", no_overlap_diagnostic(y, m, ext_status, df_keys, ext[["latitude","longitude","lead_day"]])
 
     df = normalize_merge_keys(df_raw)
     merged = df.merge(ext, on=["latitude", "longitude", "lead_day"], how="left", suffixes=("", "_new"))
@@ -313,7 +347,7 @@ def run_one(y: int, m: int) -> str:
     for c in TARGET_COLS:
         # Require at least one filled value and never overwrite existing non-null with null.
         if merged[c].notna().sum() == 0:
-            return "no_overlap"
+            return "no_overlap", no_overlap_diagnostic(y, m, ext_status, df_keys, ext[["latitude","longitude","lead_day"]])
 
     ordered_cols = list(df_raw.columns)
     for c in TARGET_COLS:
@@ -322,7 +356,7 @@ def run_one(y: int, m: int) -> str:
 
     out = merged[ordered_cols].copy()
     out.to_csv(csv_fp, index=False)
-    return "updated"
+    return "updated", None
 
 
 def main() -> int:
@@ -343,17 +377,28 @@ def main() -> int:
         "error": 0,
     }
 
+    no_overlap_diags: List[dict] = []
+
     for (y, m) in tasks:
         if should_stop_now():
             log("[STOP] time budget reached, graceful exit")
             break
         try:
-            st = run_one(y, m)
+            st, diag = run_one(y, m)
             stats[st] = stats.get(st, 0) + 1
+            if st == "no_overlap" and diag is not None:
+                no_overlap_diags.append(diag)
+                if len(no_overlap_diags) <= LOG_FIRST_N_NO_OVERLAP:
+                    log(f"[NO_OVERLAP] {y}-{m:02d} ext_status={diag['ext_status']} csv_keys={diag['csv_unique_keys']} ext_keys={diag['ext_unique_keys']} "
+                        f"shift(lat+0.5)={diag['overlap_lat+0.5_lon0.0']} shift(lon+0.5)={diag['overlap_lat0.0_lon+0.5']}")
             dlog(f"[TASK] {y}-{m:02d}: {st}")
         except Exception as e:
             stats["error"] += 1
             log(f"[ERROR] {y}-{m:02d}: {e}")
+
+    if DIAG_OUT_CSV and no_overlap_diags:
+        pd.DataFrame(no_overlap_diags).to_csv(DIAG_OUT_CSV, index=False)
+        log(f"[DIAG] wrote no-overlap diagnostics: {DIAG_OUT_CSV} rows={len(no_overlap_diags)}")
 
     log("[SUMMARY] " + " ".join([f"{k}={v}" for k, v in stats.items()]))
     return 0

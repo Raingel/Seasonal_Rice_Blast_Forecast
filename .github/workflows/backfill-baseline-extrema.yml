@@ -39,7 +39,18 @@ jobs:
           STOP_GRACE_SEC: "120"
           DEBUG: "0"
           KEY_ROUND_DP: "3"
+          LOG_FIRST_N_NO_OVERLAP: "30"
+          DIAG_OUT_CSV: "/tmp/no_overlap_diagnostics.csv"
         run: python backfill_baseline_extrema_timeboxed.py
+
+      - name: Show diagnostics preview
+        run: |
+          if [[ -f /tmp/no_overlap_diagnostics.csv ]]; then
+            echo "no_overlap_diagnostics.csv (first 20 lines)"
+            head -n 20 /tmp/no_overlap_diagnostics.csv
+          else
+            echo "No diagnostics file generated"
+          fi
 
       - name: Commit and push if changed
         run: |
