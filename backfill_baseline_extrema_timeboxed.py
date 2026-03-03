@@ -332,14 +332,27 @@ def run_one(y: int, m: int) -> Tuple[str, dict | None]:
     merged = df.merge(ext, on=["latitude", "longitude", "lead_day"], how="left", suffixes=("", "_new"))
 
     for c in TARGET_COLS:
+        new_col = f"{c}_new"
         if c in df_raw.columns:
-            merged[c] = merged[c].where(merged[c].notna(), merged.get(f"{c}_new"))
-            if f"{c}_new" in merged.columns:
-                merged = merged.drop(columns=[f"{c}_new"])
+            # Keep existing non-null values; only backfill missing values from merged extrema.
+            if new_col in merged.columns:
+                merged[c] = merged[c].where(merged[c].notna(), merged[new_col])
+                merged = merged.drop(columns=[new_col])
+            elif c in merged.columns:
+                # no-op: extrema column already merged as `c` (no collision in source)
+                pass
+            else:
+                merged[c] = merged[c]
         else:
-            merged[c] = merged.get(f"{c}_new")
-            if f"{c}_new" in merged.columns:
-                merged = merged.drop(columns=[f"{c}_new"])
+            # When source CSV lacks this column, merged extrema may be in `c` (common case)
+            # or in `c_new` (if a name collision happened upstream).
+            if c in merged.columns:
+                pass
+            elif new_col in merged.columns:
+                merged[c] = merged[new_col]
+                merged = merged.drop(columns=[new_col])
+            else:
+                merged[c] = pd.NA
 
     if len(merged) != len(df_raw):
         raise ValueError(f"row count changed unexpectedly: {csv_fp} {len(df_raw)}->{len(merged)}")
