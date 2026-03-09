@@ -1,0 +1,75 @@
+name: SEAS5 latest monthly update
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_year:
+        description: "Optional catch-up start year (empty=auto from latest existing file)"
+        required: false
+        default: ""
+      start_month:
+        description: "Optional catch-up start month 1-12 (used with start_year)"
+        required: false
+        default: ""
+  schedule:
+    # ECMWF seasonal real-time release is documented at day 6, 12:00 UTC.
+    # Run shortly after release, plus one fallback retry next day.
+    - cron: "20 12 6 * *"
+    - cron: "0 3 7 * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: seas5-latest-update
+  cancel-in-progress: false
+
+jobs:
+  update-latest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install "cdsapi>=0.7.7" xarray netCDF4 numpy pandas
+
+      - name: Run latest updater (timeboxed + catch-up)
+        env:
+          CDSAPI_URL: ${{ secrets.CDSAPI_URL }}
+          CDSAPI_KEY: ${{ secrets.CDSAPI_KEY }}
+
+          LATEST_ROOT: SEAS5/latest
+          START_YEAR: ${{ github.event_name == 'workflow_dispatch' && inputs.start_year || '' }}
+          START_MONTH: ${{ github.event_name == 'workflow_dispatch' && inputs.start_month || '' }}
+
+          HORIZON_AHEAD_MONTHS: "4"
+          TIME_BUDGET_SEC: "18000"
+          STOP_GRACE_SEC: "120"
+          DEBUG: "0"
+        run: python seas5_update_latest_timeboxed.py
+
+      - name: Commit and push if changed
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add SEAS5/latest seas5_update_latest_timeboxed.py .github/workflows/seas5_latest_update.yml || true
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git commit -m "data: update SEAS5 latest monthly forecast"
+          git push
