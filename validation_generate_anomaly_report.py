@@ -39,6 +39,7 @@ CLIM_YEAR_END = int(os.getenv("CLIM_YEAR_END", "2020"))
 SEAS5_LATEST_DIR = Path(os.getenv("SEAS5_LATEST_DIR", "SEAS5/latest"))
 SEAS5_BASELINE_DIR = Path(os.getenv("SEAS5_BASELINE_DIR", "SEAS5/baseline"))
 OUT_ROOT = Path(os.getenv("VALIDATION_OUT_ROOT", "validation/anomaly_reports"))
+DEBUG = os.getenv("DEBUG", "0").strip() in ("1", "true", "True", "yes", "YES")
 
 ERA_DAILY_VARS = [
     "temperature_2m_mean",
@@ -61,6 +62,11 @@ class PointInfo:
 
 def log(msg: str) -> None:
     print(msg, flush=True)
+
+
+def dlog(msg: str) -> None:
+    if DEBUG:
+        log(msg)
 
 
 def open_meteo_archive(lat: float, lon: float, start_d: str, end_d: str) -> pd.DataFrame:
@@ -104,7 +110,7 @@ def list_baseline_files(y0: int, y1: int) -> List[Path]:
     return out
 
 
-def find_nearest_point(files: Iterable[Path], target_lat: float, target_lon: float) -> PointInfo:
+def collect_points(files: Iterable[Path]) -> List[Tuple[float, float]]:
     pts = set()
     for fp in files:
         try:
@@ -116,6 +122,11 @@ def find_nearest_point(files: Iterable[Path], target_lat: float, target_lon: flo
             pts.add((float(r["latitude"]), float(r["longitude"])))
         if len(pts) >= 20:
             break
+    return sorted(pts)
+
+
+def find_nearest_point(points: Iterable[Tuple[float, float]], target_lat: float, target_lon: float) -> PointInfo:
+    pts = list(points)
     if not pts:
         raise RuntimeError("No SEAS5 points found to match target location")
 
@@ -128,6 +139,20 @@ def find_nearest_point(files: Iterable[Path], target_lat: float, target_lon: flo
     return PointInfo(*best)
 
 
+def find_nearest_common_point(
+    pts_a: Iterable[Tuple[float, float]],
+    pts_b: Iterable[Tuple[float, float]],
+    target_lat: float,
+    target_lon: float,
+) -> PointInfo | None:
+    set_a = set(pts_a)
+    set_b = set(pts_b)
+    common = sorted(set_a & set_b)
+    if not common:
+        return None
+    return find_nearest_point(common, target_lat, target_lon)
+
+
 def load_seas5_latest_year(year: int, p: PointInfo) -> pd.DataFrame:
     parts: List[pd.DataFrame] = []
     for fp in list_latest_files(year):
@@ -135,7 +160,7 @@ def load_seas5_latest_year(year: int, p: PointInfo) -> pd.DataFrame:
             d = pd.read_csv(fp, usecols=["latitude", "longitude", "init_date", "valid_date", "lead_day", "t2m_C", "rh_pct", "wind_mps", "tp_mm_mean"])
         except Exception:
             continue
-        d = d[(np.isclose(d["latitude"], p.lat)) & (np.isclose(d["longitude"], p.lon))].copy()
+        d = d[(np.isclose(d["latitude"], p.lat, atol=1e-4)) & (np.isclose(d["longitude"], p.lon, atol=1e-4))].copy()
         if d.empty:
             continue
         d["init_date"] = pd.to_datetime(d["init_date"]).dt.date
@@ -154,7 +179,7 @@ def load_seas5_baseline_clim_source(p: PointInfo) -> pd.DataFrame:
             d = pd.read_csv(fp, usecols=["latitude", "longitude", "valid_date", "t2m_C", "rh_pct", "wind_mps", "tp_mm_mean"])
         except Exception:
             continue
-        d = d[(np.isclose(d["latitude"], p.lat)) & (np.isclose(d["longitude"], p.lon))].copy()
+        d = d[(np.isclose(d["latitude"], p.lat, atol=1e-4)) & (np.isclose(d["longitude"], p.lon, atol=1e-4))].copy()
         if d.empty:
             continue
         d["valid_date"] = pd.to_datetime(d["valid_date"]).dt.date
@@ -328,9 +353,25 @@ def main() -> int:
     if not baseline_files:
         raise RuntimeError("No SEAS5 baseline files found for climatology")
 
-    match_ref_files = latest_files if latest_files else baseline_files
-    point = find_nearest_point(match_ref_files, TARGET_LAT, TARGET_LON)
-    log(f"[POINT] requested=({TARGET_LAT},{TARGET_LON}) matched=({point.lat},{point.lon})")
+    latest_points = collect_points(latest_files)
+    baseline_points = collect_points(baseline_files)
+    dlog(f"[DEBUG] latest_files={len(latest_files)} latest_points={len(latest_points)}")
+    dlog(f"[DEBUG] baseline_files={len(baseline_files)} baseline_points={len(baseline_points)}")
+
+    # Prefer a point existing in both latest and baseline to avoid point mismatch in anomaly validation.
+    point = find_nearest_common_point(latest_points, baseline_points, TARGET_LAT, TARGET_LON)
+    if point is not None:
+        log(
+            f"[POINT] requested=({TARGET_LAT},{TARGET_LON}) matched_common=({point.lat},{point.lon}) "
+            f"dist={point.dist_deg:.3f}"
+        )
+    else:
+        # Fallback for early bootstrapping: pick from baseline because climatology is mandatory.
+        point = find_nearest_point(baseline_points, TARGET_LAT, TARGET_LON)
+        log(
+            f"[POINT] requested=({TARGET_LAT},{TARGET_LON}) no-common-point; "
+            f"fallback_baseline=({point.lat},{point.lon}) dist={point.dist_deg:.3f}"
+        )
 
     seas5_latest = load_seas5_latest_year(REPORT_YEAR, point)
     if seas5_latest.empty:
@@ -340,7 +381,12 @@ def main() -> int:
 
     seas5_clim_src = load_seas5_baseline_clim_source(point)
     if seas5_clim_src.empty:
-        raise RuntimeError("No baseline climatology source rows after point filter")
+        # Extra diagnostics for fast troubleshooting in Actions logs.
+        sample = baseline_points[:10]
+        raise RuntimeError(
+            "No baseline climatology source rows after point filter; "
+            f"point=({point.lat},{point.lon}) baseline_points={len(baseline_points)} sample={sample}"
+        )
 
     era_clim_src = open_meteo_archive(TARGET_LAT, TARGET_LON, f"{CLIM_YEAR_START}-01-01", f"{CLIM_YEAR_END}-12-31")
     era_y_src = open_meteo_archive(TARGET_LAT, TARGET_LON, f"{REPORT_YEAR}-01-01", date.today().isoformat())
