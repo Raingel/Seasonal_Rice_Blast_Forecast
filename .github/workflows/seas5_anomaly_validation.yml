@@ -1,0 +1,70 @@
+name: SEAS5 anomaly validation report
+
+on:
+  workflow_dispatch:
+    inputs:
+      report_year:
+        description: "Year to validate (default current year if empty)"
+        required: false
+        default: ""
+      target_lat:
+        description: "Target latitude"
+        required: false
+        default: "23.0"
+      target_lon:
+        description: "Target longitude"
+        required: false
+        default: "120.0"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: seas5-anomaly-validation
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas matplotlib
+
+      - name: Generate anomaly validation report
+        env:
+          TARGET_LAT: ${{ inputs.target_lat }}
+          TARGET_LON: ${{ inputs.target_lon }}
+          REPORT_YEAR: ${{ inputs.report_year }}
+          TZ_NAME: "Asia/Taipei"
+          VALIDATION_OUT_ROOT: "validation/anomaly_reports"
+          CLIM_YEAR_START: "2000"
+          CLIM_YEAR_END: "2020"
+        run: python validation_generate_anomaly_report.py
+
+      - name: Commit and push if changed
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add validation/anomaly_reports validation_generate_anomaly_report.py .github/workflows/seas5_anomaly_validation.yml || true
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git commit -m "data: refresh SEAS5 anomaly validation report"
+          git push
