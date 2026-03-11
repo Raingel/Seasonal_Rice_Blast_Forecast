@@ -8,12 +8,15 @@ Goal
 - Fallback to legacy cache pairs:
     _cache_nc/*_initYYYY-MM-01_inst.nc + *_tp.nc
 
-This script is resumable by design (skips month if output CSV already exists and non-empty).
+This script is resumable by design:
+- native half-grid CSV already correct -> skip
+- legacy/non-native CSV -> rebuild from cache nc
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 from datetime import date
 from pathlib import Path
 from typing import List, Tuple
@@ -41,6 +44,23 @@ def month_dir(y: int, m: int) -> Path:
 
 def out_csv_path(y: int, m: int) -> Path:
     return month_dir(y, m) / f"init{y:04d}-{m:02d}-01.csv"
+
+
+def csv_is_native_half_grid(csv_path: Path) -> bool:
+    if (not csv_path.exists()) or csv_path.stat().st_size == 0:
+        return False
+    lats = set()
+    lons = set()
+    with csv_path.open("r", encoding="utf-8") as f:
+        rd = csv.DictReader(f)
+        for r in rd:
+            lats.add(float(r["latitude"]))
+            lons.add(float(r["longitude"]))
+    if not lats or not lons:
+        return False
+    lat_frac = sorted({round(v - int(v), 6) for v in lats})
+    lon_frac = sorted({round(v - int(v), 6) for v in lons})
+    return lat_frac == [0.5] and lon_frac == [0.5]
 
 
 def find_cache_pairs(y: int, m: int) -> List[Tuple[Path, Path]]:
@@ -84,7 +104,8 @@ def merge_daily_frames(frames: List[pd.DataFrame]) -> pd.DataFrame:
 def rebuild_one(y: int, m: int, overwrite: bool) -> str:
     out_csv = out_csv_path(y, m)
     if out_csv.exists() and out_csv.stat().st_size > 0 and not overwrite:
-        return "skip_exists"
+        if csv_is_native_half_grid(out_csv):
+            return "skip_native"
 
     pairs = find_cache_pairs(y, m)
     if not pairs:
@@ -114,7 +135,7 @@ def rebuild_one(y: int, m: int, overwrite: bool) -> str:
 
 def main() -> int:
     args = parse_args()
-    stats = {"rebuilt": 0, "skip_exists": 0, "missing_cache": 0, "cache_unreadable": 0, "cache_empty": 0}
+    stats = {"rebuilt": 0, "skip_native": 0, "missing_cache": 0, "cache_unreadable": 0, "cache_empty": 0}
 
     for y in range(args.start_year, args.end_year + 1):
         for m in range(1, 13):
