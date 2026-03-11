@@ -1,0 +1,79 @@
+name: SEAS5 baseline rebuild one-off
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "plan or execute"
+        required: false
+        default: "plan"
+      start_year:
+        description: "start year"
+        required: false
+        default: "2000"
+      end_year:
+        description: "end year"
+        required: false
+        default: "2025"
+  schedule:
+    - cron: "0 */6 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install "cdsapi>=0.7.7" xarray netCDF4 numpy pandas
+
+      - name: Run baseline rebuild plan/execute
+        env:
+          CDSAPI_URL: ${{ secrets.CDSAPI_URL }}
+          CDSAPI_KEY: ${{ secrets.CDSAPI_KEY }}
+        run: |
+          set -e
+          MODE="${{ github.event_name == 'schedule' && 'execute' || inputs.mode }}"
+          START_YEAR="${{ github.event_name == 'schedule' && '2000' || inputs.start_year }}"
+          END_YEAR="${{ github.event_name == 'schedule' && '2025' || inputs.end_year }}"
+          python seas5_rebuild_baseline_cds_native.py \
+            --mode "${MODE}" \
+            --start-year "${START_YEAR}" \
+            --end-year "${END_YEAR}" \
+            --time-budget-sec "18000" \
+            --stop-grace-sec "180"
+
+      - name: Upload rebuild reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: seas5-baseline-rebuild-report
+          path: validation/grid_audit/
+
+      - name: Commit and push if changed
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add seas5_rebuild_baseline_cds_native.py .github/workflows/seas5_baseline_rebuild_oneoff.yml SEAS5/baseline validation/grid_audit || true
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git commit -m "chore: one-off baseline rebuild plan/execute update"
+          git push
