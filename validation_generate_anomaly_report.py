@@ -33,7 +33,7 @@ TARGET_LAT = float(os.getenv("TARGET_LAT", "23.0"))
 TARGET_LON = float(os.getenv("TARGET_LON", "120.0"))
 TZ_NAME = os.getenv("TZ_NAME", "Asia/Taipei")
 REPORT_YEAR_RAW = os.getenv("REPORT_YEAR", "").strip()
-REPORT_YEAR = int(REPORT_YEAR_RAW) if REPORT_YEAR_RAW else date.today().year
+REPORT_YEAR_DEFAULT = date.today().year
 CLIM_YEAR_START = int(os.getenv("CLIM_YEAR_START", "2000"))
 CLIM_YEAR_END = int(os.getenv("CLIM_YEAR_END", "2020"))
 SEAS5_LATEST_DIR = Path(os.getenv("SEAS5_LATEST_DIR", "SEAS5/latest"))
@@ -51,6 +51,16 @@ ERA_DAILY_VARS = [
 # Open-Meteo wind is km/h; SEAS5 is m/s.
 KMH_TO_MPS = 1.0 / 3.6
 EPS = 1e-6
+EXPECTED_FIG_NAMES = [
+    "t2m_C_anomaly.png",
+    "t2m_C_value_vs_clim.png",
+    "rh_pct_anomaly.png",
+    "rh_pct_value_vs_clim.png",
+    "wind_mps_anomaly.png",
+    "wind_mps_value_vs_clim.png",
+    "tp_mm_mean_anomaly.png",
+    "tp_mm_mean_value_vs_clim.png",
+]
 
 
 @dataclass
@@ -101,6 +111,20 @@ def list_latest_files(year: int) -> List[Path]:
     if not SEAS5_LATEST_DIR.exists():
         return []
     return sorted(SEAS5_LATEST_DIR.glob(f"init{year:04d}-??-01.csv"))
+
+
+def list_latest_years() -> List[int]:
+    if not SEAS5_LATEST_DIR.exists():
+        return []
+    years = set()
+    for fp in SEAS5_LATEST_DIR.glob("init????-??-01.csv"):
+        name = fp.name
+        try:
+            y = int(name[4:8])
+            years.add(y)
+        except Exception:
+            continue
+    return sorted(years)
 
 
 def list_baseline_files(y0: int, y1: int) -> List[Path]:
@@ -290,6 +314,28 @@ def make_value_clim_plot(df_day: pd.DataFrame, var: str, out_png: Path, title: s
     plt.close()
 
 
+def make_placeholder_figure(out_png: Path, title: str, message: str) -> None:
+    plt.figure(figsize=(11, 4.8))
+    plt.title(title)
+    plt.axis("off")
+    plt.text(0.5, 0.5, message, ha="center", va="center", wrap=True)
+    plt.tight_layout()
+    out_png.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(out_png, dpi=140)
+    plt.close()
+
+
+def ensure_placeholder_figures(fig_dir: Path, reason: str) -> None:
+    for name in EXPECTED_FIG_NAMES:
+        fp = fig_dir / name
+        if not fp.exists() or fp.stat().st_size == 0:
+            make_placeholder_figure(
+                fp,
+                title=name.replace("_", " ").replace(".png", ""),
+                message=f"Figure unavailable: {reason}",
+            )
+
+
 def to_html_table(metrics: Dict[str, Dict[str, float]]) -> str:
     rows = []
     for var, m in metrics.items():
@@ -314,6 +360,7 @@ def write_report(year: int, point: PointInfo, metrics: Dict[str, Dict[str, float
     out_dir.mkdir(parents=True, exist_ok=True)
     fig_dir.mkdir(parents=True, exist_ok=True)
     tab_dir.mkdir(parents=True, exist_ok=True)
+    ensure_placeholder_figures(fig_dir, reason=note or "not generated")
 
     rows = to_html_table(metrics)
     html = f"""<!doctype html>
@@ -345,10 +392,26 @@ def write_report(year: int, point: PointInfo, metrics: Dict[str, Dict[str, float
 
 
 def main() -> int:
-    out_dir = OUT_ROOT / f"{REPORT_YEAR:04d}"
+    # Resolve report year from available latest files.
+    requested_year = int(REPORT_YEAR_RAW) if REPORT_YEAR_RAW else REPORT_YEAR_DEFAULT
+    available_latest_years = list_latest_years()
+
+    note_prefix = ""
+    report_year = requested_year
+    if available_latest_years:
+        if report_year not in available_latest_years:
+            fallback_year = available_latest_years[-1]
+            note_prefix = (
+                f"Requested/current year {report_year} has no SEAS5 latest files; "
+                f"fallback to latest available year {fallback_year}. "
+            )
+            log(f"[INFO] {note_prefix.strip()}")
+            report_year = fallback_year
+
+    out_dir = OUT_ROOT / f"{report_year:04d}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    latest_files = list_latest_files(REPORT_YEAR)
+    latest_files = list_latest_files(report_year)
     baseline_files = list_baseline_files(CLIM_YEAR_START, CLIM_YEAR_END)
     if not baseline_files:
         raise RuntimeError("No SEAS5 baseline files found for climatology")
@@ -373,9 +436,14 @@ def main() -> int:
             f"fallback_baseline=({point.lat},{point.lon}) dist={point.dist_deg:.3f}"
         )
 
-    seas5_latest = load_seas5_latest_year(REPORT_YEAR, point)
+    seas5_latest = load_seas5_latest_year(report_year, point)
     if seas5_latest.empty:
-        write_report(REPORT_YEAR, point, {v: {"n": 0} for v in ["t2m_C", "rh_pct", "wind_mps", "tp_mm_mean"]}, note="No SEAS5 latest data for current year yet.")
+        write_report(
+            report_year,
+            point,
+            {v: {"n": 0} for v in ["t2m_C", "rh_pct", "wind_mps", "tp_mm_mean"]},
+            note=note_prefix + "No SEAS5 latest data for selected report year yet.",
+        )
         log("[INFO] no latest data yet; wrote placeholder report")
         return 0
 
@@ -389,7 +457,7 @@ def main() -> int:
         )
 
     era_clim_src = open_meteo_archive(TARGET_LAT, TARGET_LON, f"{CLIM_YEAR_START}-01-01", f"{CLIM_YEAR_END}-12-31")
-    era_y_src = open_meteo_archive(TARGET_LAT, TARGET_LON, f"{REPORT_YEAR}-01-01", date.today().isoformat())
+    era_y_src = open_meteo_archive(TARGET_LAT, TARGET_LON, f"{report_year}-01-01", date.today().isoformat())
 
     value_cols = ["t2m_C", "rh_pct", "wind_mps", "tp_mm_mean"]
     seas5_clim = build_climatology(seas5_clim_src, value_cols=value_cols, window=7)
@@ -406,7 +474,12 @@ def main() -> int:
         suffixes=("", "_era"),
     )
     if merged.empty:
-        write_report(REPORT_YEAR, point, {v: {"n": 0} for v in value_cols}, note="No overlap yet between SEAS5 valid dates and ERA5 ground truth dates.")
+        write_report(
+            report_year,
+            point,
+            {v: {"n": 0} for v in value_cols},
+            note=note_prefix + "No overlap yet between SEAS5 valid dates and ERA5 ground truth dates.",
+        )
         log("[INFO] no overlapping dates; wrote placeholder report")
         return 0
 
@@ -444,17 +517,17 @@ def main() -> int:
     )
 
     fig_dir = out_dir / "figures"
-    make_line_plot(daily, "t2m_C", fig_dir / "t2m_C_anomaly.png", f"{REPORT_YEAR} Temperature anomaly (daily)")
-    make_value_clim_plot(daily, "t2m_C", fig_dir / "t2m_C_value_vs_clim.png", f"{REPORT_YEAR} Temperature value vs climatology")
-    make_line_plot(daily, "rh_pct", fig_dir / "rh_pct_anomaly.png", f"{REPORT_YEAR} RH anomaly (daily)")
-    make_value_clim_plot(daily, "rh_pct", fig_dir / "rh_pct_value_vs_clim.png", f"{REPORT_YEAR} RH value vs climatology")
-    make_line_plot(daily, "wind_mps", fig_dir / "wind_mps_anomaly.png", f"{REPORT_YEAR} Wind anomaly (daily)")
-    make_value_clim_plot(daily, "wind_mps", fig_dir / "wind_mps_value_vs_clim.png", f"{REPORT_YEAR} Wind value vs climatology")
-    make_line_plot(daily, "tp_mm_mean", fig_dir / "tp_mm_mean_anomaly.png", f"{REPORT_YEAR} Precip anomaly (daily)")
-    make_value_clim_plot(daily, "tp_mm_mean", fig_dir / "tp_mm_mean_value_vs_clim.png", f"{REPORT_YEAR} Precip value vs climatology")
+    make_line_plot(daily, "t2m_C", fig_dir / "t2m_C_anomaly.png", f"{report_year} Temperature anomaly (daily)")
+    make_value_clim_plot(daily, "t2m_C", fig_dir / "t2m_C_value_vs_clim.png", f"{report_year} Temperature value vs climatology")
+    make_line_plot(daily, "rh_pct", fig_dir / "rh_pct_anomaly.png", f"{report_year} RH anomaly (daily)")
+    make_value_clim_plot(daily, "rh_pct", fig_dir / "rh_pct_value_vs_clim.png", f"{report_year} RH value vs climatology")
+    make_line_plot(daily, "wind_mps", fig_dir / "wind_mps_anomaly.png", f"{report_year} Wind anomaly (daily)")
+    make_value_clim_plot(daily, "wind_mps", fig_dir / "wind_mps_value_vs_clim.png", f"{report_year} Wind value vs climatology")
+    make_line_plot(daily, "tp_mm_mean", fig_dir / "tp_mm_mean_anomaly.png", f"{report_year} Precip anomaly (daily)")
+    make_value_clim_plot(daily, "tp_mm_mean", fig_dir / "tp_mm_mean_value_vs_clim.png", f"{report_year} Precip value vs climatology")
 
     metrics = {v: compute_metrics(merged, v) for v in value_cols}
-    write_report(REPORT_YEAR, point, metrics, note=f"Rows with SEAS5-ERA5 overlap: {len(merged)}")
+    write_report(report_year, point, metrics, note=note_prefix + f"Rows with SEAS5-ERA5 overlap: {len(merged)}")
 
     log(f"[OK] report written: {(out_dir / 'index.html').resolve()}")
     return 0
