@@ -1,0 +1,170 @@
+{
+  "mode": "plan",
+  "baseline_dir": "SEAS5/baseline",
+  "start_year": 2025,
+  "end_year": 2025,
+  "total_months": 12,
+  "months_present": 12,
+  "months_half_grid": 0,
+  "months_non_half_grid": 12,
+  "archived_from": null,
+  "archived_to": null,
+  "checks": [
+    {
+      "year": 2025,
+      "month": 1,
+      "exists": true,
+      "n_points": 9,
+      "lat_frac_set": [
+        0.0
+      ],
+      "lon_frac_set": [
+        0.0
+      ],
+      "is_native_half_grid": false
+    },
+    {
+      "year": 2025,
+      "month": 2,
+      "exists": true,
+      "n_points": 9,
+      "lat_frac_set": [
+        0.0
+      ],
+      "lon_frac_set": [
+        0.0
+      ],
+      "is_native_half_grid": false
+    },
+    {
+      "year": 2025,
+      "month": 3,
+      "exists": true,
+      "n_points": 9,
+      "lat_frac_set": [
+        0.0
+      ],
+      "lon_frac_set": [
+        0.0
+      ],
+      "is_native_half_grid": false
+    },
+    {
+      "year": 2025,
+      "month": 4,
+      "exists": true,
+      "n_points": 9,
+      "lat_frac_set": [
+        0.0
+      ],
+      "lon_frac_set": [
+        0.0
+      ],
+      "is_native_half_grid": false
+    },
+    {
+      "year": 2025,
+      "month": 5,
+      "exists": true,
+      "n_points": 9,
+      "lat_frac_set": [
+        0.0
+      ],
+      "lon_frac_set": [
+        0.0
+      ],
+      "is_native_half_grid": false
+    },
+    {
+      "year": 2025,
+      "month": 6,
+      "exists": true,
+      "n_points": 9,
+      "lat_frac_set": [
+        0.0
+      ],
+      "lon_frac_set": [
+        0.0
+      ],
+      "is_native_half_grid": false
+    },
+    {
+      "year": 2025,
+      "month": 7,
+      "exists": true,
+      "n_points": 9,
+      "lat_frac_set": [
+        0.0
+      ],
+      "lon_frac_set": [
+        0.0
+      ],
+      "is_native_half_grid": false
+    },
+    {
+      "year": 2025,
+      "month": 8,
+      "exists": true,
+      "n_points": 9,
+      "lat_frac_set": [
+        0.0
+      ],
+      "lon_frac_set": [
+        0.0
+      ],
+      "is_native_half_grid": false
+    },
+    {
+      "year": 2025,
+      "month": 9,
+      "exists": true,
+      "n_points": 9,
+      "lat_frac_set": [
+        0.0
+      ],
+      "lon_frac_set": [
+        0.0
+      ],
+      "is_native_half_grid": false
+    },
+    {
+      "year": 2025,
+      "month": 10,
+      "exists": true,
+      "n_points": 9,
+      "lat_frac_set": [
+        0.0
+      ],
+      "lon_frac_set": [
+        0.0
+      ],
+      "is_native_half_grid": false
+    },
+    {
+      "year": 2025,
+      "month": 11,
+      "exists": true,
+      "n_points": 9,
+      "lat_frac_set": [
+        0.0
+      ],
+      "lon_frac_set": [
+        0.0
+      ],
+      "is_native_half_grid": false
+    },
+    {
+      "year": 2025,
+      "month": 12,
+      "exists": true,
+      "n_points": 9,
+      "lat_frac_set": [
+        0.0
+      ],
+      "lon_frac_set": [
+        0.0
+      ],
+      "is_native_half_grid": false
+    }
+  ]
+}
