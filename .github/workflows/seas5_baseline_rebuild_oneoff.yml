@@ -15,6 +15,10 @@ on:
         description: "end year"
         required: false
         default: "2025"
+      rebuild_source:
+        description: "cache_nc or cds"
+        required: false
+        default: "cache_nc"
   schedule:
     - cron: "0 */6 * * *"
 
@@ -49,12 +53,20 @@ jobs:
           MODE="${{ github.event_name == 'schedule' && 'execute' || inputs.mode }}"
           START_YEAR="${{ github.event_name == 'schedule' && '2000' || inputs.start_year }}"
           END_YEAR="${{ github.event_name == 'schedule' && '2025' || inputs.end_year }}"
-          python seas5_rebuild_baseline_cds_native.py \
-            --mode "${MODE}" \
-            --start-year "${START_YEAR}" \
-            --end-year "${END_YEAR}" \
-            --time-budget-sec "18000" \
-            --stop-grace-sec "180"
+          SOURCE="${{ github.event_name == 'schedule' && 'cache_nc' || inputs.rebuild_source }}"
+
+          if [ "${SOURCE}" = "cache_nc" ] && [ "${MODE}" = "execute" ]; then
+            python seas5_rebuild_baseline_from_cache_nc.py \
+              --start-year "${START_YEAR}" \
+              --end-year "${END_YEAR}"
+          else
+            python seas5_rebuild_baseline_cds_native.py \
+              --mode "${MODE}" \
+              --start-year "${START_YEAR}" \
+              --end-year "${END_YEAR}" \
+              --time-budget-sec "18000" \
+              --stop-grace-sec "180"
+          fi
 
       - name: Upload rebuild reports
         uses: actions/upload-artifact@v4
@@ -68,7 +80,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add seas5_rebuild_baseline_cds_native.py .github/workflows/seas5_baseline_rebuild_oneoff.yml SEAS5/baseline validation/grid_audit || true
+          git add seas5_rebuild_baseline_cds_native.py seas5_rebuild_baseline_from_cache_nc.py .github/workflows/seas5_baseline_rebuild_oneoff.yml SEAS5/baseline validation/grid_audit || true
 
           if git diff --cached --quiet; then
             echo "No changes to commit"
