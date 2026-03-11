@@ -335,7 +335,13 @@ def to_html_table(metrics: Dict[str, Dict[str, float]]) -> str:
     return "\n".join(rows)
 
 
-def write_report(init_date: date, point: PointInfo, metrics: Dict[str, Dict[str, float]], note: str = "") -> None:
+def write_report(
+    init_date: date,
+    latest_point: PointInfo,
+    baseline_point: PointInfo,
+    metrics: Dict[str, Dict[str, float]],
+    note: str = "",
+) -> None:
     out_dir = OUT_ROOT / init_date.isoformat()
     fig_dir = out_dir / "figures"
     tab_dir = out_dir / "tables"
@@ -350,7 +356,9 @@ def write_report(init_date: date, point: PointInfo, metrics: Dict[str, Dict[str,
 <style>body{{font-family:Arial,sans-serif;max-width:1200px;margin:20px auto;padding:0 12px}}table{{border-collapse:collapse}}td,th{{border:1px solid #ccc;padding:6px 10px}}</style>
 </head><body>
 <h1>SEAS5 anomaly report (init {init_date})</h1>
-<p>Target point: requested ({TARGET_LAT:.3f}, {TARGET_LON:.3f}), matched SEAS5 grid ({point.lat:.3f}, {point.lon:.3f}), distance={point.dist_deg:.3f} deg.</p>
+<p>Target point requested: ({TARGET_LAT:.3f}, {TARGET_LON:.3f}).</p>
+<p>Latest forecast grid: ({latest_point.lat:.3f}, {latest_point.lon:.3f}), distance={latest_point.dist_deg:.3f} deg.</p>
+<p>Baseline climatology grid: ({baseline_point.lat:.3f}, {baseline_point.lon:.3f}), distance={baseline_point.dist_deg:.3f} deg.</p>
 <p>Method: nearest-grid matching; SEAS5 climatology {CLIM_YEAR_START}-{CLIM_YEAR_END} with day-of-year ±7-day window; precipitation dual-track anomaly (difference + ratio).</p>
 <p>{note}</p>
 <h2>Metrics</h2>
@@ -387,28 +395,30 @@ def main() -> int:
     dlog(f"[DEBUG] latest_files={len(latest_files)} latest_points={len(latest_points)}")
     dlog(f"[DEBUG] baseline_files={len(baseline_files)} baseline_points={len(baseline_points)}")
 
-    # Prefer a point existing in both latest and baseline to avoid point mismatch in anomaly validation.
-    point = find_nearest_common_point(latest_points, baseline_points, TARGET_LAT, TARGET_LON)
-    if point is not None:
+    common_point = find_nearest_common_point(latest_points, baseline_points, TARGET_LAT, TARGET_LON)
+    if common_point is not None:
+        latest_point = common_point
+        baseline_point = common_point
         log(
-            f"[POINT] requested=({TARGET_LAT},{TARGET_LON}) matched_common=({point.lat},{point.lon}) "
-            f"dist={point.dist_deg:.3f}"
+            f"[POINT] requested=({TARGET_LAT},{TARGET_LON}) matched_common=({common_point.lat},{common_point.lon}) "
+            f"dist={common_point.dist_deg:.3f}"
         )
     else:
-        # Fallback for early bootstrapping: pick from baseline because climatology is mandatory.
-        point = find_nearest_point(baseline_points, TARGET_LAT, TARGET_LON)
+        latest_point = find_nearest_point(latest_points, TARGET_LAT, TARGET_LON)
+        baseline_point = find_nearest_point(baseline_points, TARGET_LAT, TARGET_LON)
         log(
             f"[POINT] requested=({TARGET_LAT},{TARGET_LON}) no-common-point; "
-            f"fallback_baseline=({point.lat},{point.lon}) dist={point.dist_deg:.3f}"
+            f"latest=({latest_point.lat},{latest_point.lon}) dist={latest_point.dist_deg:.3f}; "
+            f"baseline=({baseline_point.lat},{baseline_point.lon}) dist={baseline_point.dist_deg:.3f}"
         )
 
-    seas5_clim_src = load_seas5_baseline_clim_source(point)
+    seas5_clim_src = load_seas5_baseline_clim_source(baseline_point)
     if seas5_clim_src.empty:
         # Extra diagnostics for fast troubleshooting in Actions logs.
         sample = baseline_points[:10]
         raise RuntimeError(
             "No baseline climatology source rows after point filter; "
-            f"point=({point.lat},{point.lon}) baseline_points={len(baseline_points)} sample={sample}"
+            f"point=({baseline_point.lat},{baseline_point.lon}) baseline_points={len(baseline_points)} sample={sample}"
         )
 
     value_cols = ["t2m_C", "rh_pct", "wind_mps", "tp_mm_mean"]
@@ -416,9 +426,15 @@ def main() -> int:
     for init_date in target_inits:
         out_dir = OUT_ROOT / init_date.isoformat()
         out_dir.mkdir(parents=True, exist_ok=True)
-        seas5_latest = load_seas5_latest_inits([init_date], point)
+        seas5_latest = load_seas5_latest_inits([init_date], latest_point)
         if seas5_latest.empty:
-            write_report(init_date, point, {v: {"n": 0} for v in value_cols}, note="No SEAS5 latest data for selected init.")
+            write_report(
+                init_date,
+                latest_point,
+                baseline_point,
+                {v: {"n": 0} for v in value_cols},
+                note="No SEAS5 latest data for selected init after point filtering.",
+            )
             continue
 
         merged = attach_anomaly(seas5_latest, seas5_clim, value_cols, prefix="seas5")
@@ -452,7 +468,7 @@ def main() -> int:
         make_value_clim_plot(daily, "tp_mm_mean", fig_dir / "tp_mm_mean_value_vs_clim.png", f"{init_date} Precip value vs climatology")
 
         metrics = {v: compute_metrics(merged, v) for v in value_cols}
-        write_report(init_date, point, metrics, note=f"Rows in selected init: {len(merged)}")
+        write_report(init_date, latest_point, baseline_point, metrics, note=f"Rows in selected init: {len(merged)}")
         log(f"[OK] report written: {(out_dir / 'index.html').resolve()}")
     return 0
 
