@@ -4,9 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       report_year:
-        description: "Year to validate (default current year if empty)"
+        description: "Year of init files to report (e.g., 2026)"
         required: false
         default: ""
+      init_months:
+        description: "Comma-separated init months (used with report_year), e.g. 1,2,3"
+        required: false
+        default: "1,2,3"
       target_lat:
         description: "Target latitude"
         required: false
@@ -47,10 +51,11 @@ jobs:
           TARGET_LAT: ${{ inputs.target_lat }}
           TARGET_LON: ${{ inputs.target_lon }}
           REPORT_YEAR: ${{ inputs.report_year }}
+          INIT_MONTHS: ${{ inputs.init_months }}
           TZ_NAME: "Asia/Taipei"
           VALIDATION_OUT_ROOT: "validation/anomaly_reports"
           CLIM_YEAR_START: "2000"
-          CLIM_YEAR_END: "2020"
+          CLIM_YEAR_END: "2025"
         run: python validation_generate_anomaly_report.py
 
       - name: Commit and push if changed
