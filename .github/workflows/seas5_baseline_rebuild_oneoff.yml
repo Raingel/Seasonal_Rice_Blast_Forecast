@@ -15,6 +15,8 @@ on:
         description: "end year"
         required: false
         default: "2025"
+  schedule:
+    - cron: "0 */6 * * *"
 
 permissions:
   contents: write
@@ -22,7 +24,7 @@ permissions:
 jobs:
   rebuild:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 355
 
     steps:
       - uses: actions/checkout@v4
@@ -44,10 +46,15 @@ jobs:
           CDSAPI_KEY: ${{ secrets.CDSAPI_KEY }}
         run: |
           set -e
+          MODE="${{ github.event_name == 'schedule' && 'execute' || inputs.mode }}"
+          START_YEAR="${{ github.event_name == 'schedule' && '2000' || inputs.start_year }}"
+          END_YEAR="${{ github.event_name == 'schedule' && '2025' || inputs.end_year }}"
           python seas5_rebuild_baseline_cds_native.py \
-            --mode "${{ inputs.mode }}" \
-            --start-year "${{ inputs.start_year }}" \
-            --end-year "${{ inputs.end_year }}"
+            --mode "${MODE}" \
+            --start-year "${START_YEAR}" \
+            --end-year "${END_YEAR}" \
+            --time-budget-sec "18000" \
+            --stop-grace-sec "180"
 
       - name: Upload rebuild reports
         uses: actions/upload-artifact@v4

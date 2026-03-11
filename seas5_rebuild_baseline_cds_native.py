@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""One-off baseline rebuild runner to restore CDS-native grid for SEAS5 baseline.
+"""One-off/resumable baseline rebuild runner to restore CDS-native grid for SEAS5 baseline.
 
 This script is intentionally conservative:
 1) PLAN mode (default): inspect current baseline and produce risk/report files only.
-2) EXECUTE mode: archive current baseline, rebuild year-by-year using
-   `seas5_build_monthly_baseline_timeboxed.py`, then verify rebuilt grid fractions.
+2) EXECUTE mode: archive current baseline once, rebuild with timeboxed downloader,
+   then verify rebuilt grid fractions. Safe for repeated resume runs.
 
 Why:
 - Current audit shows latest aligns with CDS native (.5 grid) but baseline is legacy (.0 grid).
@@ -28,6 +28,7 @@ from typing import Dict, List, Tuple
 
 REPO_BASELINE_DIR = Path("SEAS5/baseline")
 REPORT_DIR = Path("validation/grid_audit")
+STATE_FILE = Path("SEAS5") / "_baseline_rebuild_state.json"
 
 
 @dataclass
@@ -169,12 +170,12 @@ def ensure_cds_env() -> None:
         raise RuntimeError("Missing CDSAPI_KEY in environment")
 
 
-def run_year_rebuild(y: int, args: argparse.Namespace) -> None:
+def run_rebuild_pass(args: argparse.Namespace) -> None:
     env = os.environ.copy()
     env.update(
         {
-            "BASELINE_YEAR_MIN": str(y),
-            "BASELINE_YEAR_MAX": str(y),
+            "BASELINE_YEAR_MIN": str(args.start_year),
+            "BASELINE_YEAR_MAX": str(args.end_year),
             "INIT_MONTHS": "1-12",
             "HORIZON_AHEAD_MONTHS": "4",
             "OUT_ROOT": "SEAS5",
@@ -184,30 +185,52 @@ def run_year_rebuild(y: int, args: argparse.Namespace) -> None:
         }
     )
     cmd = ["python", "seas5_build_monthly_baseline_timeboxed.py"]
-    print(f"[RUN] rebuild year {y}: {' '.join(cmd)}", flush=True)
+    print(f"[RUN] rebuild pass years={args.start_year}-{args.end_year}: {' '.join(cmd)}", flush=True)
     subprocess.run(cmd, env=env, check=True)
+
+
+def load_state() -> Dict[str, object]:
+    if not STATE_FILE.exists():
+        return {}
+    return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+
+
+def save_state(state: Dict[str, object]) -> None:
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STATE_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def execute_rebuild(args: argparse.Namespace) -> RebuildReport:
     ensure_cds_env()
 
-    archive_root = Path(args.archive_root)
-    archive_root.mkdir(parents=True, exist_ok=True)
-    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-    archived_to = archive_root / f"baseline_legacy_backup_{ts}"
+    state = load_state()
+    archived_to = None
+    if not state.get("archive_done", False):
+        archive_root = Path(args.archive_root)
+        archive_root.mkdir(parents=True, exist_ok=True)
+        ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+        archived_to = archive_root / f"baseline_legacy_backup_{ts}"
+        if REPO_BASELINE_DIR.exists():
+            print(f"[ARCHIVE] move {REPO_BASELINE_DIR} -> {archived_to}", flush=True)
+            shutil.move(str(REPO_BASELINE_DIR), str(archived_to))
+        REPO_BASELINE_DIR.mkdir(parents=True, exist_ok=True)
+        state = {
+            "archive_done": True,
+            "archived_to": str(archived_to),
+            "start_year": args.start_year,
+            "end_year": args.end_year,
+            "created_at_utc": datetime.utcnow().isoformat() + "Z",
+        }
+        save_state(state)
+    else:
+        archived_to = Path(str(state.get("archived_to", ""))) if state.get("archived_to") else None
 
-    if REPO_BASELINE_DIR.exists():
-        print(f"[ARCHIVE] move {REPO_BASELINE_DIR} -> {archived_to}", flush=True)
-        shutil.move(str(REPO_BASELINE_DIR), str(archived_to))
-    REPO_BASELINE_DIR.mkdir(parents=True, exist_ok=True)
-
-    for y in range(args.start_year, args.end_year + 1):
-        run_year_rebuild(y, args)
+    run_rebuild_pass(args)
 
     rep = inspect_baseline_grid(REPO_BASELINE_DIR, args.start_year, args.end_year)
     rep.mode = "execute"
     rep.archived_from = str(REPO_BASELINE_DIR)
-    rep.archived_to = str(archived_to)
+    rep.archived_to = str(archived_to) if archived_to else None
     return rep
 
 
