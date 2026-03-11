@@ -12,9 +12,8 @@ on:
         required: false
         default: "2025"
   schedule:
-    # 每月 10 號，日本時間 10:00 執行（01:00 UTC = 10:00 JST）
-    #- cron: "0 0,6,12,18 * * *"
-    - cron: "0 0 1 1 1"
+    # 每月 7 號 UTC 執行，對齊月初新資料上線後的補抓節奏
+    - cron: "0 2 7 * *"
 
 concurrency:
   group: seas5-baseline
@@ -48,9 +47,11 @@ jobs:
 
       - name: Show resolved parameters
         run: |
+          CUR_YEAR="$(date -u +%Y)"
+          echo "CUR_YEAR=${CUR_YEAR}" >> "$GITHUB_ENV"
           echo "event=${{ github.event_name }}"
           echo "BASELINE_YEAR_MIN=${{ github.event_name == 'workflow_dispatch' && inputs.baseline_year_min || '2000' }}"
-          echo "BASELINE_YEAR_MAX=${{ github.event_name == 'workflow_dispatch' && inputs.baseline_year_max || '2025' }}"
+          echo "BASELINE_YEAR_MAX=${{ github.event_name == 'workflow_dispatch' && inputs.baseline_year_max || 'CUR_YEAR(auto)' }}"
 
       - name: Build baseline (timeboxed)
         env:
@@ -59,7 +60,7 @@ jobs:
 
           # baseline settings (manual trigger can override years)
           BASELINE_YEAR_MIN: ${{ github.event_name == 'workflow_dispatch' && inputs.baseline_year_min || '2000' }}
-          BASELINE_YEAR_MAX: ${{ github.event_name == 'workflow_dispatch' && inputs.baseline_year_max || '2025' }}
+          BASELINE_YEAR_MAX: ${{ github.event_name == 'workflow_dispatch' && inputs.baseline_year_max || env.CUR_YEAR }}
           INIT_MONTHS: "1-12"
           HORIZON_AHEAD_MONTHS: "4"
           OUT_ROOT: "SEAS5"
