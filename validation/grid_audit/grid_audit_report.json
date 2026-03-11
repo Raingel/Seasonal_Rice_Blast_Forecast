@@ -6,10 +6,10 @@
     {
       "sample": "latest:2026-01",
       "csv_path": "SEAS5/latest/init2026-01-01.csv",
-      "downloaded": false,
-      "cds_nc_path": null,
-      "point_intersection_count": null,
-      "point_intersection_ratio_vs_csv": null,
+      "downloaded": true,
+      "cds_nc_path": "validation/grid_audit/cds_latest_2026-01.nc",
+      "point_intersection_count": 6,
+      "point_intersection_ratio_vs_csv": 1.0,
       "csv_grid": {
         "n_points": 6,
         "lat_min": 22.5,
@@ -53,15 +53,57 @@
           ]
         ]
       },
-      "cds_grid": null
+      "cds_grid": {
+        "n_points": 6,
+        "lat_min": 22.5,
+        "lat_max": 24.5,
+        "lon_min": 120.5,
+        "lon_max": 121.5,
+        "unique_lats": 3,
+        "unique_lons": 2,
+        "lat_step_guess": 1.0,
+        "lon_step_guess": 1.0,
+        "lat_fraction_set": [
+          0.5
+        ],
+        "lon_fraction_set": [
+          0.5
+        ],
+        "sample_points": [
+          [
+            22.5,
+            120.5
+          ],
+          [
+            22.5,
+            121.5
+          ],
+          [
+            23.5,
+            120.5
+          ],
+          [
+            23.5,
+            121.5
+          ],
+          [
+            24.5,
+            120.5
+          ],
+          [
+            24.5,
+            121.5
+          ]
+        ]
+      }
     },
     {
       "sample": "baseline:2025-01",
       "csv_path": "SEAS5/baseline/2025/01/init2025-01-01.csv",
-      "downloaded": false,
-      "cds_nc_path": null,
-      "point_intersection_count": null,
-      "point_intersection_ratio_vs_csv": null,
+      "downloaded": true,
+      "cds_nc_path": "validation/grid_audit/cds_baseline_2025-01.nc",
+      "point_intersection_count": 0,
+      "point_intersection_ratio_vs_csv": 0.0,
       "csv_grid": {
         "n_points": 9,
         "lat_min": 22.0,
@@ -117,7 +159,215 @@
           ]
         ]
       },
-      "cds_grid": null
+      "cds_grid": {
+        "n_points": 16,
+        "lat_min": 21.5,
+        "lat_max": 24.5,
+        "lon_min": 119.5,
+        "lon_max": 122.5,
+        "unique_lats": 4,
+        "unique_lons": 4,
+        "lat_step_guess": 1.0,
+        "lon_step_guess": 1.0,
+        "lat_fraction_set": [
+          0.5
+        ],
+        "lon_fraction_set": [
+          0.5
+        ],
+        "sample_points": [
+          [
+            21.5,
+            119.5
+          ],
+          [
+            21.5,
+            120.5
+          ],
+          [
+            21.5,
+            121.5
+          ],
+          [
+            21.5,
+            122.5
+          ],
+          [
+            22.5,
+            119.5
+          ],
+          [
+            22.5,
+            120.5
+          ],
+          [
+            22.5,
+            121.5
+          ],
+          [
+            22.5,
+            122.5
+          ],
+          [
+            23.5,
+            119.5
+          ],
+          [
+            23.5,
+            120.5
+          ],
+          [
+            23.5,
+            121.5
+          ],
+          [
+            23.5,
+            122.5
+          ]
+        ]
+      }
+    },
+    {
+      "sample": "baseline:2011-06",
+      "csv_path": "SEAS5/baseline/2011/06/init2011-06-01.csv",
+      "downloaded": true,
+      "cds_nc_path": "validation/grid_audit/cds_baseline_2011-06.nc",
+      "point_intersection_count": 0,
+      "point_intersection_ratio_vs_csv": 0.0,
+      "csv_grid": {
+        "n_points": 12,
+        "lat_min": 22.0,
+        "lat_max": 25.0,
+        "lon_min": 120.0,
+        "lon_max": 122.0,
+        "unique_lats": 4,
+        "unique_lons": 3,
+        "lat_step_guess": 1.0,
+        "lon_step_guess": 1.0,
+        "lat_fraction_set": [
+          0.0
+        ],
+        "lon_fraction_set": [
+          0.0
+        ],
+        "sample_points": [
+          [
+            22.0,
+            120.0
+          ],
+          [
+            22.0,
+            121.0
+          ],
+          [
+            22.0,
+            122.0
+          ],
+          [
+            23.0,
+            120.0
+          ],
+          [
+            23.0,
+            121.0
+          ],
+          [
+            23.0,
+            122.0
+          ],
+          [
+            24.0,
+            120.0
+          ],
+          [
+            24.0,
+            121.0
+          ],
+          [
+            24.0,
+            122.0
+          ],
+          [
+            25.0,
+            120.0
+          ],
+          [
+            25.0,
+            121.0
+          ],
+          [
+            25.0,
+            122.0
+          ]
+        ]
+      },
+      "cds_grid": {
+        "n_points": 20,
+        "lat_min": 21.5,
+        "lat_max": 25.5,
+        "lon_min": 119.5,
+        "lon_max": 122.5,
+        "unique_lats": 5,
+        "unique_lons": 4,
+        "lat_step_guess": 1.0,
+        "lon_step_guess": 1.0,
+        "lat_fraction_set": [
+          0.5
+        ],
+        "lon_fraction_set": [
+          0.5
+        ],
+        "sample_points": [
+          [
+            21.5,
+            119.5
+          ],
+          [
+            21.5,
+            120.5
+          ],
+          [
+            21.5,
+            121.5
+          ],
+          [
+            21.5,
+            122.5
+          ],
+          [
+            22.5,
+            119.5
+          ],
+          [
+            22.5,
+            120.5
+          ],
+          [
+            22.5,
+            121.5
+          ],
+          [
+            22.5,
+            122.5
+          ],
+          [
+            23.5,
+            119.5
+          ],
+          [
+            23.5,
+            120.5
+          ],
+          [
+            23.5,
+            121.5
+          ],
+          [
+            23.5,
+            122.5
+          ]
+        ]
+      }
     }
   ],
   "cross_sample_csv_overlap": {
@@ -125,6 +375,16 @@
       "intersection": 0,
       "ratio_vs_left": 0.0,
       "ratio_vs_right": 0.0
+    },
+    "latest:2026-01__vs__baseline:2011-06": {
+      "intersection": 0,
+      "ratio_vs_left": 0.0,
+      "ratio_vs_right": 0.0
+    },
+    "baseline:2025-01__vs__baseline:2011-06": {
+      "intersection": 9,
+      "ratio_vs_left": 1.0,
+      "ratio_vs_right": 0.75
     }
   }
 }
