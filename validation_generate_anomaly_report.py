@@ -1,24 +1,23 @@
 #!/usr/bin/env python3
-"""Generate SEAS5 anomaly validation report against Open-Meteo ERA5.
+"""Generate SEAS5 anomaly report using SEAS5 internal climatology only.
 
 Method choices (fixed by design)
 - Point matching: nearest available SEAS5 grid point to target lat/lon.
-- Climatology: day-of-year ±7-day moving window, baseline years 2000-2020.
+- Climatology source: historical SEAS5 baseline years 2000-2025.
+- Validation target: SEAS5 latest forecast initializations.
+- Climatology method: day-of-year ±7-day moving window.
 - Variables:
-  - Temperature / RH / Wind: difference anomaly and z-score proxy metrics.
+  - Temperature / RH / Wind: difference anomaly metrics.
   - Precipitation: dual-track anomaly (difference + ratio to climatology).
-- Output: overwrite one report per year.
+- Output: one report per initialization month.
 """
 
 from __future__ import annotations
 
-import json
 import math
 import os
-import urllib.parse
-import urllib.request
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
@@ -35,21 +34,12 @@ TZ_NAME = os.getenv("TZ_NAME", "Asia/Taipei")
 REPORT_YEAR_RAW = os.getenv("REPORT_YEAR", "").strip()
 REPORT_YEAR_DEFAULT = date.today().year
 CLIM_YEAR_START = int(os.getenv("CLIM_YEAR_START", "2000"))
-CLIM_YEAR_END = int(os.getenv("CLIM_YEAR_END", "2020"))
+CLIM_YEAR_END = int(os.getenv("CLIM_YEAR_END", "2025"))
 SEAS5_LATEST_DIR = Path(os.getenv("SEAS5_LATEST_DIR", "SEAS5/latest"))
 SEAS5_BASELINE_DIR = Path(os.getenv("SEAS5_BASELINE_DIR", "SEAS5/baseline"))
 OUT_ROOT = Path(os.getenv("VALIDATION_OUT_ROOT", "validation/anomaly_reports"))
+INIT_MONTHS_RAW = os.getenv("INIT_MONTHS", "").strip()
 DEBUG = os.getenv("DEBUG", "0").strip() in ("1", "true", "True", "yes", "YES")
-
-ERA_DAILY_VARS = [
-    "temperature_2m_mean",
-    "wind_speed_10m_mean",
-    "relative_humidity_2m_mean",
-    "precipitation_sum",
-]
-
-# Open-Meteo wind is km/h; SEAS5 is m/s.
-KMH_TO_MPS = 1.0 / 3.6
 EPS = 1e-6
 EXPECTED_FIG_NAMES = [
     "t2m_C_anomaly.png",
@@ -79,34 +69,6 @@ def dlog(msg: str) -> None:
         log(msg)
 
 
-def open_meteo_archive(lat: float, lon: float, start_d: str, end_d: str) -> pd.DataFrame:
-    params = {
-        "latitude": f"{lat:.4f}",
-        "longitude": f"{lon:.4f}",
-        "start_date": start_d,
-        "end_date": end_d,
-        "daily": ",".join(ERA_DAILY_VARS),
-        "models": "era5_seamless",
-        "timezone": TZ_NAME,
-    }
-    url = "https://archive-api.open-meteo.com/v1/archive?" + urllib.parse.urlencode(params)
-    with urllib.request.urlopen(url, timeout=120) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
-
-    daily = payload.get("daily", {})
-    if not daily or "time" not in daily:
-        raise RuntimeError(f"open-meteo missing daily payload: {url}")
-
-    df = pd.DataFrame({
-        "valid_date": pd.to_datetime(daily["time"]).date,
-        "t2m_C": pd.to_numeric(daily.get("temperature_2m_mean", []), errors="coerce"),
-        "wind_mps": pd.to_numeric(daily.get("wind_speed_10m_mean", []), errors="coerce") * KMH_TO_MPS,
-        "rh_pct": pd.to_numeric(daily.get("relative_humidity_2m_mean", []), errors="coerce"),
-        "tp_mm_mean": pd.to_numeric(daily.get("precipitation_sum", []), errors="coerce"),
-    })
-    return df
-
-
 def list_latest_files(year: int) -> List[Path]:
     if not SEAS5_LATEST_DIR.exists():
         return []
@@ -125,6 +87,32 @@ def list_latest_years() -> List[int]:
         except Exception:
             continue
     return sorted(years)
+
+
+def parse_init_date_from_filename(fp: Path) -> date | None:
+    try:
+        return datetime.strptime(fp.stem.replace("init", ""), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def resolve_target_inits() -> List[date]:
+    available = sorted(
+        [d for d in (parse_init_date_from_filename(fp) for fp in SEAS5_LATEST_DIR.glob("init????-??-01.csv")) if d is not None]
+    )
+    if not available:
+        return []
+
+    if REPORT_YEAR_RAW:
+        report_year = int(REPORT_YEAR_RAW)
+        selected = [d for d in available if d.year == report_year]
+        if INIT_MONTHS_RAW:
+            mm = {int(x) for x in INIT_MONTHS_RAW.split(",") if x.strip()}
+            selected = [d for d in selected if d.month in mm]
+        return selected
+
+    # Auto mode: process latest init only (for scheduled runs).
+    return [available[-1]]
 
 
 def list_baseline_files(y0: int, y1: int) -> List[Path]:
@@ -177,12 +165,15 @@ def find_nearest_common_point(
     return find_nearest_point(common, target_lat, target_lon)
 
 
-def load_seas5_latest_year(year: int, p: PointInfo) -> pd.DataFrame:
+def load_seas5_latest_inits(inits: List[date], p: PointInfo) -> pd.DataFrame:
     parts: List[pd.DataFrame] = []
-    for fp in list_latest_files(year):
+    init_set = {d.isoformat() for d in inits}
+    for fp in SEAS5_LATEST_DIR.glob("init????-??-01.csv"):
         try:
             d = pd.read_csv(fp, usecols=["latitude", "longitude", "init_date", "valid_date", "lead_day", "t2m_C", "rh_pct", "wind_mps", "tp_mm_mean"])
         except Exception:
+            continue
+        if d.empty or str(d.iloc[0].get("init_date", "")) not in init_set:
             continue
         d = d[(np.isclose(d["latitude"], p.lat, atol=1e-4)) & (np.isclose(d["longitude"], p.lon, atol=1e-4))].copy()
         if d.empty:
@@ -258,25 +249,20 @@ def attach_anomaly(df: pd.DataFrame, clim: pd.DataFrame, value_cols: List[str], 
 
 
 def compute_metrics(df: pd.DataFrame, var: str) -> Dict[str, float]:
-    a = pd.to_numeric(df[f"seas5_{var}_anom"], errors="coerce")
-    b = pd.to_numeric(df[f"era5_{var}_anom"], errors="coerce")
-    m = pd.DataFrame({"a": a, "b": b}).dropna()
-    if m.empty:
+    a = pd.to_numeric(df[f"seas5_{var}_anom"], errors="coerce").dropna()
+    if a.empty:
         return {"n": 0}
-    err = m["a"] - m["b"]
     out = {
-        "n": int(len(m)),
-        "bias": float(err.mean()),
-        "mae": float(err.abs().mean()),
-        "rmse": float(np.sqrt((err**2).mean())),
-        "corr": float(m["a"].corr(m["b"])),
-        "sign_hit": float((np.sign(m["a"]) == np.sign(m["b"]).astype(int)).mean()),
+        "n": int(len(a)),
+        "anom_mean": float(a.mean()),
+        "anom_abs_mean": float(a.abs().mean()),
+        "anom_std": float(a.std(ddof=0)),
+        "anom_pos_frac": float((a > 0).mean()),
     }
     if var == "tp_mm_mean":
-        ra = pd.to_numeric(df["seas5_tp_mm_mean_ratio_anom"], errors="coerce")
-        rb = pd.to_numeric(df["era5_tp_mm_mean_ratio_anom"], errors="coerce")
-        mr = pd.DataFrame({"a": ra, "b": rb}).dropna()
-        out["ratio_mae"] = float((mr["a"] - mr["b"]).abs().mean()) if not mr.empty else np.nan
+        ra = pd.to_numeric(df["seas5_tp_mm_mean_ratio_anom"], errors="coerce").dropna()
+        out["ratio_anom_mean"] = float(ra.mean()) if not ra.empty else np.nan
+        out["ratio_anom_abs_mean"] = float(ra.abs().mean()) if not ra.empty else np.nan
     return out
 
 
@@ -284,8 +270,6 @@ def make_line_plot(df_day: pd.DataFrame, var: str, out_png: Path, title: str) ->
     plt.figure(figsize=(11, 4.8))
     x = pd.to_datetime(df_day["valid_date"])
     plt.plot(x, df_day[f"seas5_{var}_anom"], label="SEAS5 anomaly", lw=1.7)
-    plt.plot(x, df_day[f"era5_{var}_anom"], label="ERA5 anomaly", lw=1.7)
-    plt.plot(x, df_day[f"seas5_{var}_anom"] - df_day[f"era5_{var}_anom"], label="Anomaly error", lw=1.2, ls="--")
     plt.axhline(0, color="gray", lw=0.8)
     plt.title(title)
     plt.xlabel("Valid date")
@@ -301,9 +285,7 @@ def make_value_clim_plot(df_day: pd.DataFrame, var: str, out_png: Path, title: s
     plt.figure(figsize=(11, 4.8))
     x = pd.to_datetime(df_day["valid_date"])
     plt.plot(x, df_day[f"seas5_{var}"], label="SEAS5 value", lw=1.5)
-    plt.plot(x, df_day[f"era5_{var}"], label="ERA5 value", lw=1.5)
     plt.plot(x, df_day[f"{var}_clim"], label="SEAS5 climatology", lw=1.0, ls=":")
-    plt.plot(x, df_day[f"era5_{var}_clim"], label="ERA5 climatology", lw=1.0, ls=':')
     plt.title(title)
     plt.xlabel("Valid date")
     plt.ylabel("Value")
@@ -342,19 +324,19 @@ def to_html_table(metrics: Dict[str, Dict[str, float]]) -> str:
         rows.append(
             "<tr>"
             f"<td>{var}</td><td>{m.get('n', 0)}</td>"
-            f"<td>{m.get('bias', float('nan')):.3f}</td>"
-            f"<td>{m.get('mae', float('nan')):.3f}</td>"
-            f"<td>{m.get('rmse', float('nan')):.3f}</td>"
-            f"<td>{m.get('corr', float('nan')):.3f}</td>"
-            f"<td>{m.get('sign_hit', float('nan')):.3f}</td>"
-            f"<td>{m.get('ratio_mae', float('nan')):.3f}</td>"
+            f"<td>{m.get('anom_mean', float('nan')):.3f}</td>"
+            f"<td>{m.get('anom_abs_mean', float('nan')):.3f}</td>"
+            f"<td>{m.get('anom_std', float('nan')):.3f}</td>"
+            f"<td>{m.get('anom_pos_frac', float('nan')):.3f}</td>"
+            f"<td>{m.get('ratio_anom_mean', float('nan')):.3f}</td>"
+            f"<td>{m.get('ratio_anom_abs_mean', float('nan')):.3f}</td>"
             "</tr>"
         )
     return "\n".join(rows)
 
 
-def write_report(year: int, point: PointInfo, metrics: Dict[str, Dict[str, float]], note: str = "") -> None:
-    out_dir = OUT_ROOT / f"{year:04d}"
+def write_report(init_date: date, point: PointInfo, metrics: Dict[str, Dict[str, float]], note: str = "") -> None:
+    out_dir = OUT_ROOT / init_date.isoformat()
     fig_dir = out_dir / "figures"
     tab_dir = out_dir / "tables"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -364,16 +346,15 @@ def write_report(year: int, point: PointInfo, metrics: Dict[str, Dict[str, float
 
     rows = to_html_table(metrics)
     html = f"""<!doctype html>
-<html><head><meta charset='utf-8'><title>SEAS5 anomaly validation {year}</title>
+<html><head><meta charset='utf-8'><title>SEAS5 anomaly report {init_date}</title>
 <style>body{{font-family:Arial,sans-serif;max-width:1200px;margin:20px auto;padding:0 12px}}table{{border-collapse:collapse}}td,th{{border:1px solid #ccc;padding:6px 10px}}</style>
 </head><body>
-<h1>SEAS5 anomaly validation report ({year})</h1>
+<h1>SEAS5 anomaly report (init {init_date})</h1>
 <p>Target point: requested ({TARGET_LAT:.3f}, {TARGET_LON:.3f}), matched SEAS5 grid ({point.lat:.3f}, {point.lon:.3f}), distance={point.dist_deg:.3f} deg.</p>
-<p>Method: nearest-grid matching; climatology {CLIM_YEAR_START}-{CLIM_YEAR_END} with day-of-year ±7-day window; precipitation dual-track anomaly (difference + ratio).</p>
-<p>Timezone alignment: {TZ_NAME}.</p>
+<p>Method: nearest-grid matching; SEAS5 climatology {CLIM_YEAR_START}-{CLIM_YEAR_END} with day-of-year ±7-day window; precipitation dual-track anomaly (difference + ratio).</p>
 <p>{note}</p>
 <h2>Metrics</h2>
-<table><tr><th>Variable</th><th>N</th><th>Bias</th><th>MAE</th><th>RMSE</th><th>Corr</th><th>Sign hit</th><th>Precip ratio MAE</th></tr>
+<table><tr><th>Variable</th><th>N</th><th>Anom mean</th><th>Anom abs mean</th><th>Anom std</th><th>Positive frac</th><th>Precip ratio mean</th><th>Precip ratio abs mean</th></tr>
 {rows}
 </table>
 <h2>Figures</h2>
@@ -392,26 +373,11 @@ def write_report(year: int, point: PointInfo, metrics: Dict[str, Dict[str, float
 
 
 def main() -> int:
-    # Resolve report year from available latest files.
-    requested_year = int(REPORT_YEAR_RAW) if REPORT_YEAR_RAW else REPORT_YEAR_DEFAULT
-    available_latest_years = list_latest_years()
+    target_inits = resolve_target_inits()
+    if not target_inits:
+        raise RuntimeError("No SEAS5 latest files found for requested initialization month(s)")
 
-    note_prefix = ""
-    report_year = requested_year
-    if available_latest_years:
-        if report_year not in available_latest_years:
-            fallback_year = available_latest_years[-1]
-            note_prefix = (
-                f"Requested/current year {report_year} has no SEAS5 latest files; "
-                f"fallback to latest available year {fallback_year}. "
-            )
-            log(f"[INFO] {note_prefix.strip()}")
-            report_year = fallback_year
-
-    out_dir = OUT_ROOT / f"{report_year:04d}"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    latest_files = list_latest_files(report_year)
+    latest_files = [SEAS5_LATEST_DIR / f"init{d.isoformat()}.csv" for d in target_inits]
     baseline_files = list_baseline_files(CLIM_YEAR_START, CLIM_YEAR_END)
     if not baseline_files:
         raise RuntimeError("No SEAS5 baseline files found for climatology")
@@ -436,17 +402,6 @@ def main() -> int:
             f"fallback_baseline=({point.lat},{point.lon}) dist={point.dist_deg:.3f}"
         )
 
-    seas5_latest = load_seas5_latest_year(report_year, point)
-    if seas5_latest.empty:
-        write_report(
-            report_year,
-            point,
-            {v: {"n": 0} for v in ["t2m_C", "rh_pct", "wind_mps", "tp_mm_mean"]},
-            note=note_prefix + "No SEAS5 latest data for selected report year yet.",
-        )
-        log("[INFO] no latest data yet; wrote placeholder report")
-        return 0
-
     seas5_clim_src = load_seas5_baseline_clim_source(point)
     if seas5_clim_src.empty:
         # Extra diagnostics for fast troubleshooting in Actions logs.
@@ -456,80 +411,49 @@ def main() -> int:
             f"point=({point.lat},{point.lon}) baseline_points={len(baseline_points)} sample={sample}"
         )
 
-    era_clim_src = open_meteo_archive(TARGET_LAT, TARGET_LON, f"{CLIM_YEAR_START}-01-01", f"{CLIM_YEAR_END}-12-31")
-    era_y_src = open_meteo_archive(TARGET_LAT, TARGET_LON, f"{report_year}-01-01", date.today().isoformat())
-
     value_cols = ["t2m_C", "rh_pct", "wind_mps", "tp_mm_mean"]
     seas5_clim = build_climatology(seas5_clim_src, value_cols=value_cols, window=7)
-    era_clim = build_climatology(era_clim_src, value_cols=value_cols, window=7)
+    for init_date in target_inits:
+        out_dir = OUT_ROOT / init_date.isoformat()
+        out_dir.mkdir(parents=True, exist_ok=True)
+        seas5_latest = load_seas5_latest_inits([init_date], point)
+        if seas5_latest.empty:
+            write_report(init_date, point, {v: {"n": 0} for v in value_cols}, note="No SEAS5 latest data for selected init.")
+            continue
 
-    s = attach_anomaly(seas5_latest, seas5_clim, value_cols, prefix="seas5")
-    e = attach_anomaly(era_y_src, era_clim, value_cols, prefix="era5")
+        merged = attach_anomaly(seas5_latest, seas5_clim, value_cols, prefix="seas5")
+        tab_dir = out_dir / "tables"
+        tab_dir.mkdir(parents=True, exist_ok=True)
+        merged.to_csv(tab_dir / "daily_pairs.csv", index=False)
 
-    # Merge by valid_date; ground truth availability controls final rows.
-    merged = s.merge(
-        e[["valid_date", *value_cols, *[f"{c}_clim" for c in value_cols], *[f"era5_{c}_anom" for c in value_cols], "era5_tp_mm_mean_ratio_anom"]],
-        on="valid_date",
-        how="inner",
-        suffixes=("", "_era"),
-    )
-    if merged.empty:
-        write_report(
-            report_year,
-            point,
-            {v: {"n": 0} for v in value_cols},
-            note=note_prefix + "No overlap yet between SEAS5 valid dates and ERA5 ground truth dates.",
+        daily = merged.groupby("valid_date", as_index=False).agg(
+            seas5_t2m_C_anom=("seas5_t2m_C_anom", "mean"),
+            seas5_rh_pct_anom=("seas5_rh_pct_anom", "mean"),
+            seas5_wind_mps_anom=("seas5_wind_mps_anom", "mean"),
+            seas5_tp_mm_mean_anom=("seas5_tp_mm_mean_anom", "mean"),
+            seas5_t2m_C=("t2m_C", "mean"),
+            seas5_rh_pct=("rh_pct", "mean"),
+            seas5_wind_mps=("wind_mps", "mean"),
+            seas5_tp_mm_mean=("tp_mm_mean", "mean"),
+            t2m_C_clim=("t2m_C_clim", "mean"),
+            rh_pct_clim=("rh_pct_clim", "mean"),
+            wind_mps_clim=("wind_mps_clim", "mean"),
+            tp_mm_mean_clim=("tp_mm_mean_clim", "mean"),
         )
-        log("[INFO] no overlapping dates; wrote placeholder report")
-        return 0
 
-    # Save tables
-    tab_dir = out_dir / "tables"
-    tab_dir.mkdir(parents=True, exist_ok=True)
-    merged.to_csv(tab_dir / "daily_pairs.csv", index=False)
+        fig_dir = out_dir / "figures"
+        make_line_plot(daily, "t2m_C", fig_dir / "t2m_C_anomaly.png", f"{init_date} Temperature anomaly (daily)")
+        make_value_clim_plot(daily, "t2m_C", fig_dir / "t2m_C_value_vs_clim.png", f"{init_date} Temperature value vs climatology")
+        make_line_plot(daily, "rh_pct", fig_dir / "rh_pct_anomaly.png", f"{init_date} RH anomaly (daily)")
+        make_value_clim_plot(daily, "rh_pct", fig_dir / "rh_pct_value_vs_clim.png", f"{init_date} RH value vs climatology")
+        make_line_plot(daily, "wind_mps", fig_dir / "wind_mps_anomaly.png", f"{init_date} Wind anomaly (daily)")
+        make_value_clim_plot(daily, "wind_mps", fig_dir / "wind_mps_value_vs_clim.png", f"{init_date} Wind value vs climatology")
+        make_line_plot(daily, "tp_mm_mean", fig_dir / "tp_mm_mean_anomaly.png", f"{init_date} Precip anomaly (daily)")
+        make_value_clim_plot(daily, "tp_mm_mean", fig_dir / "tp_mm_mean_value_vs_clim.png", f"{init_date} Precip value vs climatology")
 
-    # Daily aggregate for line charts (x-axis day)
-    daily = merged.groupby("valid_date", as_index=False).agg(
-        seas5_t2m_C_anom=("seas5_t2m_C_anom", "mean"),
-        era5_t2m_C_anom=("era5_t2m_C_anom", "mean"),
-        seas5_rh_pct_anom=("seas5_rh_pct_anom", "mean"),
-        era5_rh_pct_anom=("era5_rh_pct_anom", "mean"),
-        seas5_wind_mps_anom=("seas5_wind_mps_anom", "mean"),
-        era5_wind_mps_anom=("era5_wind_mps_anom", "mean"),
-        seas5_tp_mm_mean_anom=("seas5_tp_mm_mean_anom", "mean"),
-        era5_tp_mm_mean_anom=("era5_tp_mm_mean_anom", "mean"),
-        seas5_t2m_C=("t2m_C", "mean"),
-        era5_t2m_C=("t2m_C_era", "mean"),
-        seas5_rh_pct=("rh_pct", "mean"),
-        era5_rh_pct=("rh_pct_era", "mean"),
-        seas5_wind_mps=("wind_mps", "mean"),
-        era5_wind_mps=("wind_mps_era", "mean"),
-        seas5_tp_mm_mean=("tp_mm_mean", "mean"),
-        era5_tp_mm_mean=("tp_mm_mean_era", "mean"),
-        t2m_C_clim=("t2m_C_clim", "mean"),
-        rh_pct_clim=("rh_pct_clim", "mean"),
-        wind_mps_clim=("wind_mps_clim", "mean"),
-        tp_mm_mean_clim=("tp_mm_mean_clim", "mean"),
-        era5_t2m_C_clim=("t2m_C_clim_era", "mean"),
-        era5_rh_pct_clim=("rh_pct_clim_era", "mean"),
-        era5_wind_mps_clim=("wind_mps_clim_era", "mean"),
-        era5_tp_mm_mean_clim=("tp_mm_mean_clim_era", "mean"),
-    )
-
-    fig_dir = out_dir / "figures"
-    make_line_plot(daily, "t2m_C", fig_dir / "t2m_C_anomaly.png", f"{report_year} Temperature anomaly (daily)")
-    make_value_clim_plot(daily, "t2m_C", fig_dir / "t2m_C_value_vs_clim.png", f"{report_year} Temperature value vs climatology")
-    make_line_plot(daily, "rh_pct", fig_dir / "rh_pct_anomaly.png", f"{report_year} RH anomaly (daily)")
-    make_value_clim_plot(daily, "rh_pct", fig_dir / "rh_pct_value_vs_clim.png", f"{report_year} RH value vs climatology")
-    make_line_plot(daily, "wind_mps", fig_dir / "wind_mps_anomaly.png", f"{report_year} Wind anomaly (daily)")
-    make_value_clim_plot(daily, "wind_mps", fig_dir / "wind_mps_value_vs_clim.png", f"{report_year} Wind value vs climatology")
-    make_line_plot(daily, "tp_mm_mean", fig_dir / "tp_mm_mean_anomaly.png", f"{report_year} Precip anomaly (daily)")
-    make_value_clim_plot(daily, "tp_mm_mean", fig_dir / "tp_mm_mean_value_vs_clim.png", f"{report_year} Precip value vs climatology")
-
-    metrics = {v: compute_metrics(merged, v) for v in value_cols}
-    write_report(report_year, point, metrics, note=note_prefix + f"Rows with SEAS5-ERA5 overlap: {len(merged)}")
-
-    log(f"[OK] report written: {(out_dir / 'index.html').resolve()}")
+        metrics = {v: compute_metrics(merged, v) for v in value_cols}
+        write_report(init_date, point, metrics, note=f"Rows in selected init: {len(merged)}")
+        log(f"[OK] report written: {(out_dir / 'index.html').resolve()}")
     return 0
 
 
