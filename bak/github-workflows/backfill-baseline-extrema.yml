@@ -2,6 +2,9 @@ name: Backfill baseline RH/WIND extrema
 
 on:
   workflow_dispatch: {}
+  schedule:
+    # 每月 baseline 更新後執行一次，確保舊月份也會補齊極值欄位
+    - cron: "0 5 8 * *"
 
 permissions:
   contents: write
@@ -49,6 +52,18 @@ jobs:
           else
             echo "No diagnostics file generated"
           fi
+
+      - name: QA baseline extrema schema/content
+        env:
+          MAX_MISSING_COL_FILES: "0"
+          MAX_NULL_EXTREMA_ROWS: "0"
+          MAX_BAD_ORDER_ROWS: "0"
+          MAX_BAD_RH_RANGE_ROWS: "0"
+          MAX_NEG_WIND_ROWS: "0"
+          MAX_CONTINUITY_GAP_GROUPS: "0"
+          MIN_NEIGHBOR_PAIR_CORR: "0.3"
+          MIN_NEIGHBOR_PAIR_COUNT: "10"
+        run: python qa_extrema_backfill_check.py
 
       - name: Commit and push if changed
         run: |

@@ -73,6 +73,34 @@ jobs:
         run: |
           python seas5_build_monthly_baseline_timeboxed.py
 
+      - name: Validate newly generated baseline CSV schema
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          import subprocess
+          import sys
+
+          required = ["rh_pct_max", "rh_pct_min", "wind_mps_max", "wind_mps_min"]
+          cmd = ["git", "diff", "--name-only", "--", "SEAS5/baseline"]
+          changed = [x.strip() for x in subprocess.check_output(cmd, text=True).splitlines() if x.strip()]
+          files = [fp for fp in changed if fp.endswith(".csv") and "/init" in fp]
+          if not files:
+              print("No changed baseline CSV files to validate.")
+              sys.exit(0)
+
+          bad = []
+          for fp in files:
+              cols = list(pd.read_csv(fp, nrows=1).columns)
+              miss = [c for c in required if c not in cols]
+              if miss:
+                  bad.append((fp, miss))
+          if bad:
+              for fp, miss in bad:
+                  print(f"[SCHEMA-FAIL] {fp} missing columns: {miss}")
+              sys.exit(1)
+          print(f"Schema OK for {len(files)} changed baseline CSV files.")
+          PY
+
       - name: Commit & push changes (if any)
         run: |
           set -e
