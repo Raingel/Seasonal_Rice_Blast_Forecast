@@ -361,7 +361,11 @@ def to_daily_for_month(
                t2m_C_max=("t2m_C", "max"),
                t2m_C_min=("t2m_C", "min"),
                rh_pct_mean=("rh_pct", "mean"),
+               rh_pct_max=("rh_pct", "max"),
+               rh_pct_min=("rh_pct", "min"),
                wind_mps_mean=("wind_mps", "mean"),
+               wind_mps_max=("wind_mps", "max"),
+               wind_mps_min=("wind_mps", "min"),
                n6=("t2m_C", "count"),
            )
     )
@@ -378,7 +382,11 @@ def to_daily_for_month(
                               t2m_C_max=("t2m_C_max", "mean"),
                               t2m_C_min=("t2m_C_min", "mean"),
                               rh_pct_mean=("rh_pct_mean", "mean"),
+                              rh_pct_max=("rh_pct_max", "mean"),
+                              rh_pct_min=("rh_pct_min", "mean"),
                               wind_mps_mean=("wind_mps_mean", "mean"),
+                              wind_mps_max=("wind_mps_max", "mean"),
+                              wind_mps_min=("wind_mps_min", "mean"),
                               ens_n=("number", "nunique"),
                               n6=("n6", "sum"),  # 注意：ensemble mean 情境下，這是加總，不能拿去跟 4 比
                           )
@@ -492,6 +500,10 @@ def save_daily_csv(df_daily: pd.DataFrame, out_csv: Path, *, init_date: date, en
             "rh_pct": df_daily["rh_pct_mean"],
             "wind_mps": df_daily["wind_mps_mean"],
             "tp_mm_mean": df_daily["tp_mm_sum"],
+            "rh_pct_max": df_daily["rh_pct_max"],
+            "rh_pct_min": df_daily["rh_pct_min"],
+            "wind_mps_max": df_daily["wind_mps_max"],
+            "wind_mps_min": df_daily["wind_mps_min"],
         })
 
     out.to_csv(out_csv, index=False)
