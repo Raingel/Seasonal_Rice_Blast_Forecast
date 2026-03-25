@@ -16,6 +16,8 @@ on:
     # Run shortly after release, plus one fallback retry next day.
     - cron: "20 12 6 * *"
     - cron: "0 3 7 * *"
+    # Quarterly health-check run (Jan/Apr/Jul/Oct) to ensure seasonal pipeline stays healthy.
+    - cron: "30 3 8 1,4,7,10 *"
 
 permissions:
   contents: write
@@ -75,7 +77,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add SEAS5/latest validation/anomaly_reports seas5_update_latest_timeboxed.py validation_generate_anomaly_report.py .github/workflows/seas5_latest_update.yml .github/workflows/seas5_anomaly_validation.yml || true
+          git add SEAS5/latest validation/anomaly_reports seas5_update_latest_timeboxed.py validation_generate_anomaly_report.py .github/workflows/seas5_latest_update.yml || true
 
           if git diff --cached --quiet; then
             echo "No changes to commit"
