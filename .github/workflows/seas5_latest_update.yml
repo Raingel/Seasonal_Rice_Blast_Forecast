@@ -11,6 +11,18 @@ on:
         description: "Optional catch-up start month 1-12 (used with start_year)"
         required: false
         default: ""
+      force_rebuild_existing:
+        description: "Rebuild months even if CSV already exists (true/false)"
+        required: false
+        default: "false"
+      keep_latest_members:
+        description: "Also output per-member latest files under SEAS5/latest_members (true/false)"
+        required: false
+        default: "true"
+      backfill_2026_q1:
+        description: "One-click backfill for 2026-01..current month with force rebuild (true/false)"
+        required: false
+        default: "false"
   schedule:
     # ECMWF seasonal real-time release is documented at day 6, 12:00 UTC.
     # Run shortly after release, plus one fallback retry next day.
@@ -51,8 +63,11 @@ jobs:
           CDSAPI_KEY: ${{ secrets.CDSAPI_KEY }}
 
           LATEST_ROOT: SEAS5/latest
-          START_YEAR: ${{ github.event_name == 'workflow_dispatch' && inputs.start_year || '' }}
-          START_MONTH: ${{ github.event_name == 'workflow_dispatch' && inputs.start_month || '' }}
+          LATEST_MEMBERS_ROOT: SEAS5/latest_members
+          START_YEAR: ${{ github.event_name == 'workflow_dispatch' && (inputs.backfill_2026_q1 == 'true' && '2026' || inputs.start_year) || '' }}
+          START_MONTH: ${{ github.event_name == 'workflow_dispatch' && (inputs.backfill_2026_q1 == 'true' && '1' || inputs.start_month) || '' }}
+          FORCE_REBUILD_EXISTING: ${{ github.event_name == 'workflow_dispatch' && (inputs.backfill_2026_q1 == 'true' && 'true' || inputs.force_rebuild_existing) || 'false' }}
+          KEEP_LATEST_MEMBERS: ${{ github.event_name == 'workflow_dispatch' && inputs.keep_latest_members || 'true' }}
 
           HORIZON_AHEAD_MONTHS: "4"
           TIME_BUDGET_SEC: "18000"
@@ -77,7 +92,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add SEAS5/latest validation/anomaly_reports seas5_update_latest_timeboxed.py validation_generate_anomaly_report.py .github/workflows/seas5_latest_update.yml || true
+          git add SEAS5/latest SEAS5/latest_members validation/anomaly_reports seas5_update_latest_timeboxed.py validation_generate_anomaly_report.py .github/workflows/seas5_latest_update.yml || true
 
           if git diff --cached --quiet; then
             echo "No changes to commit"
