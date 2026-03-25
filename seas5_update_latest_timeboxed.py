@@ -10,6 +10,7 @@ Purpose
 
 Output
 - SEAS5/latest/initYYYY-MM-01.csv
+- SEAS5/latest_members/initYYYY-MM-01.csv (optional; per-member)
 - SEAS5/latest/_cache_nc/initYYYY-MM-01_{inst,tp}.nc
 """
 
@@ -35,6 +36,7 @@ RETRY_MAX = int(os.getenv("RETRY_MAX", "4"))
 DEBUG = os.getenv("DEBUG", "0").strip() in ("1", "true", "True", "YES", "yes")
 
 LATEST_ROOT = Path(os.getenv("LATEST_ROOT", "SEAS5/latest"))
+LATEST_MEMBERS_ROOT = Path(os.getenv("LATEST_MEMBERS_ROOT", "SEAS5/latest_members"))
 POINTS_FILE = Path(os.getenv("POINTS_FILE", "points.csv"))
 GRID_DEG = float(os.getenv("GRID_DEG", "1.0"))
 
@@ -46,6 +48,8 @@ TAIWAN_LON_MAX = float(os.getenv("TAIWAN_LON_MAX", "122"))
 
 START_YEAR = os.getenv("START_YEAR", "").strip()
 START_MONTH = os.getenv("START_MONTH", "").strip()
+KEEP_LATEST_MEMBERS = os.getenv("KEEP_LATEST_MEMBERS", "1").strip() in ("1", "true", "True", "YES", "yes")
+FORCE_REBUILD_EXISTING = os.getenv("FORCE_REBUILD_EXISTING", "0").strip() in ("1", "true", "True", "YES", "yes")
 
 DATASET = "seasonal-original-single-levels"
 ORIGINATING_CENTRE = "ecmwf"
@@ -244,7 +248,7 @@ def rh_from_t_td_c(t_c: pd.Series, td_c: pd.Series) -> pd.Series:
     return (100.0 * (e / es)).clip(0.0, 100.0)
 
 
-def to_daily(inst_nc: Path, tp_nc: Path) -> pd.DataFrame:
+def to_daily(inst_nc: Path, tp_nc: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
     ds_inst = xr.open_dataset(inst_nc)
     ds_tp = xr.open_dataset(tp_nc)
 
@@ -276,7 +280,8 @@ def to_daily(inst_nc: Path, tp_nc: Path) -> pd.DataFrame:
         wind_mps_min=("wind_mps", "min"),
     )
 
-    if "number" in df6_member.columns:
+    has_member_dim = "number" in df6_member.columns
+    if has_member_dim:
         df6_daily = df6_member.groupby(["latitude", "longitude", "lead_day"], as_index=False).agg(
             t2m_C=("t2m_C", "mean"),
             t2m_C_max=("t2m_C_max", "mean"),
@@ -301,16 +306,33 @@ def to_daily(inst_nc: Path, tp_nc: Path) -> pd.DataFrame:
         dfp["tp_mm_24h"] = dfp.groupby(["number", "latitude", "longitude"])["tp_mm_cum"].diff()
         dfp_member = dfp.dropna(subset=["tp_mm_24h"]).copy()
         dfp_member["lead_day"] = (((dfp_member["valid_time"] - init_time).dt.total_seconds() // 86400).astype(int) - 1)
-        dfp_daily = dfp_member.groupby(["latitude", "longitude", "lead_day"], as_index=False).agg(tp_mm_mean=("tp_mm_24h", "mean"))
+        dfp_member_daily = dfp_member.groupby(["number", "latitude", "longitude", "lead_day"], as_index=False).agg(
+            tp_mm_mean=("tp_mm_24h", "sum")
+        )
+        dfp_daily = dfp_member_daily.groupby(["latitude", "longitude", "lead_day"], as_index=False).agg(tp_mm_mean=("tp_mm_mean", "mean"))
     else:
         dfp = dfp.sort_values(["latitude", "longitude", "valid_time"])
         dfp["tp_mm_24h"] = dfp.groupby(["latitude", "longitude"])["tp_mm_cum"].diff()
         dfp = dfp.dropna(subset=["tp_mm_24h"]).copy()
         dfp["lead_day"] = (((dfp["valid_time"] - init_time).dt.total_seconds() // 86400).astype(int) - 1)
         dfp_daily = dfp.groupby(["latitude", "longitude", "lead_day"], as_index=False).agg(tp_mm_mean=("tp_mm_24h", "sum"))
+        dfp_member_daily = pd.DataFrame(columns=["number", "latitude", "longitude", "lead_day", "tp_mm_mean"])
 
-    out = df6_daily.merge(dfp_daily, on=["latitude", "longitude", "lead_day"], how="inner")
-    return out.sort_values(["latitude", "longitude", "lead_day"]).reset_index(drop=True)
+    out_daily = df6_daily.merge(dfp_daily, on=["latitude", "longitude", "lead_day"], how="inner")
+
+    if has_member_dim and (not dfp_member_daily.empty):
+        out_member = df6_member.merge(
+            dfp_member_daily,
+            on=["number", "latitude", "longitude", "lead_day"],
+            how="inner",
+        )
+    else:
+        out_member = out_daily.copy()
+        out_member["number"] = 0
+
+    out_daily = out_daily.sort_values(["latitude", "longitude", "lead_day"]).reset_index(drop=True)
+    out_member = out_member.sort_values(["number", "latitude", "longitude", "lead_day"]).reset_index(drop=True)
+    return out_daily, out_member
 
 
 def list_existing_months(root: Path) -> List[Tuple[int, int]]:
@@ -348,19 +370,23 @@ def resolve_targets(today: date) -> List[Tuple[int, int]]:
     return month_iter(start[0], start[1], end[0], end[1])
 
 
-def build_paths(y: int, m: int) -> Tuple[Path, Path, Path]:
+def build_paths(y: int, m: int) -> Tuple[Path, Path, Path, Path]:
     cache_dir = LATEST_ROOT / "_cache_nc"
     cache_dir.mkdir(parents=True, exist_ok=True)
+    LATEST_MEMBERS_ROOT.mkdir(parents=True, exist_ok=True)
     return (
         LATEST_ROOT / f"init{y:04d}-{m:02d}-01.csv",
+        LATEST_MEMBERS_ROOT / f"init{y:04d}-{m:02d}-01.csv",
         cache_dir / f"init{y:04d}-{m:02d}-01_inst.nc",
         cache_dir / f"init{y:04d}-{m:02d}-01_tp.nc",
     )
 
 
-def run_one(client: "cdsapi.Client", points: List[Tuple[float, float]], y: int, m: int) -> str:
-    out_csv, inst_nc, tp_nc = build_paths(y, m)
-    if out_csv.exists() and out_csv.stat().st_size > 0:
+def run_one(client: Optional["cdsapi.Client"], points: List[Tuple[float, float]], y: int, m: int) -> str:
+    out_csv, out_member_csv, inst_nc, tp_nc = build_paths(y, m)
+    mean_ready = out_csv.exists() and out_csv.stat().st_size > 0
+    member_ready = out_member_csv.exists() and out_member_csv.stat().st_size > 0
+    if (not FORCE_REBUILD_EXISTING) and mean_ready and ((not KEEP_LATEST_MEMBERS) or member_ready):
         return "skip_exists"
 
     init_dt = date(y, m, 1)
@@ -370,8 +396,16 @@ def run_one(client: "cdsapi.Client", points: List[Tuple[float, float]], y: int, 
     req_inst = build_request(y, m, lead_hours_inst(init_dt, end_dt), INST_VARIABLES, area)
     req_tp = build_request(y, m, lead_hours_tp(init_dt, end_dt), PRECIP_VARIABLE, area)
 
-    ready_inst = retrieve_with_retry(client, req_inst, inst_nc)
-    ready_tp = retrieve_with_retry(client, req_tp, tp_nc)
+    cache_ready = inst_nc.exists() and inst_nc.stat().st_size > 0 and tp_nc.exists() and tp_nc.stat().st_size > 0
+    if cache_ready:
+        log(f"[CACHE] use cached nc for {y}-{m:02d}")
+        ready_inst, ready_tp = True, True
+    else:
+        if client is None:
+            log(f"[WARN] {y}-{m:02d}: cache missing and CDS client unavailable")
+            return "not_ready"
+        ready_inst = retrieve_with_retry(client, req_inst, inst_nc)
+        ready_tp = retrieve_with_retry(client, req_tp, tp_nc)
     if not (ready_inst and ready_tp):
         if inst_nc.exists() and inst_nc.stat().st_size == 0:
             inst_nc.unlink(missing_ok=True)
@@ -379,30 +413,50 @@ def run_one(client: "cdsapi.Client", points: List[Tuple[float, float]], y: int, 
             tp_nc.unlink(missing_ok=True)
         return "not_ready"
 
-    df = to_daily(inst_nc, tp_nc)
-    df = df[(df["lead_day"] >= 0) & (df["lead_day"] <= (end_dt - init_dt).days)].copy()
-    df["init_date"] = pd.Timestamp(init_dt).date()
-    df["valid_date"] = (pd.Timestamp(init_dt) + pd.to_timedelta(df["lead_day"], unit="D")).dt.date
+    df_daily, df_member = to_daily(inst_nc, tp_nc)
+    max_lead = (end_dt - init_dt).days
+
+    df_daily = df_daily[(df_daily["lead_day"] >= 0) & (df_daily["lead_day"] <= max_lead)].copy()
+    df_daily["init_date"] = pd.Timestamp(init_dt).date()
+    df_daily["valid_date"] = (pd.Timestamp(init_dt) + pd.to_timedelta(df_daily["lead_day"], unit="D")).dt.date
 
     out_cols = [
         "latitude", "longitude", "init_date", "valid_date", "lead_day", "ens_n",
         "t2m_C", "t2m_C_max", "t2m_C_min", "rh_pct", "wind_mps", "tp_mm_mean",
         "rh_pct_max", "rh_pct_min", "wind_mps_max", "wind_mps_min",
     ]
-    df[out_cols].to_csv(out_csv, index=False)
+    df_daily[out_cols].to_csv(out_csv, index=False)
+
+    if KEEP_LATEST_MEMBERS:
+        df_member = df_member[(df_member["lead_day"] >= 0) & (df_member["lead_day"] <= max_lead)].copy()
+        df_member["init_date"] = pd.Timestamp(init_dt).date()
+        df_member["valid_date"] = (pd.Timestamp(init_dt) + pd.to_timedelta(df_member["lead_day"], unit="D")).dt.date
+        df_member["ens_n"] = 1
+        member_cols = [
+            "latitude", "longitude", "number", "init_date", "valid_date", "lead_day", "ens_n",
+            "t2m_C", "t2m_C_max", "t2m_C_min", "rh_pct", "wind_mps", "tp_mm_mean",
+            "rh_pct_max", "rh_pct_min", "wind_mps_max", "wind_mps_min",
+        ]
+        df_member[member_cols].to_csv(out_member_csv, index=False)
     return "updated"
 
 
 def main() -> int:
-    write_cdsapirc_from_env()
-    client = cdsapi.Client()
-    points = load_points()
-
     today = date.today()
     targets = resolve_targets(today)
     if not targets:
         log("[INFO] no target months to update")
         return 0
+
+    has_key = bool(os.getenv("CDSAPI_KEY", "").strip())
+    client: Optional["cdsapi.Client"] = None
+    if has_key:
+        write_cdsapirc_from_env()
+        client = cdsapi.Client()
+    else:
+        log("[INFO] CDSAPI_KEY not provided; run in cache-only mode.")
+
+    points = load_points()
 
     stats = {"updated": 0, "skip_exists": 0, "not_ready": 0, "error": 0}
     log(f"[PLAN] targets={len(targets)} first={targets[0]} last={targets[-1]}")
