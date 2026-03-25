@@ -12,6 +12,13 @@ This repository stores and auto-updates ECMWF SEAS5 seasonal forecast CSV data u
   - Preserve per-member outputs in `SEAS5/latest_members/*.csv` for uncertainty analysis.
   - Regenerate anomaly validation report under `validation/anomaly_reports/`.
 
+## Grid note
+
+- Official C3S / SEAS5 single-level output is a regular `1-degree by 1-degree` lat-lon grid.
+- The native cell centers are expected on `.5` coordinates, for example `22.5, 23.5, 24.5`.
+- In this repo, current `SEAS5/latest` aligns with that native `.5` grid, while historical `SEAS5/baseline` CSVs are legacy `.0` integer-grid outputs and should be treated as rebuild targets rather than native truth.
+- Use `seas5_native_grid_qc.py` to regenerate the local evidence report under `validation/grid_audit/`.
+
 ## What is archived/inactive（已封存停用）
 
 To keep maintenance simple and avoid accidental one-off jobs, all non-essential workflows were moved to:
@@ -35,6 +42,7 @@ GitHub Actions only executes workflow files directly under `.github/workflows/`,
 - `SEAS5/latest_members/`: per-member latest forecast CSVs for uncertainty analysis.
 - `validation/anomaly_reports/`: generated anomaly reports.
 - `seas5_update_latest_timeboxed.py`: latest forecast update script.
+- `seas5_native_grid_qc.py`: local QC report for native-vs-legacy grid evidence.
 - `.github/workflows/seas5_latest_update.yml`: the only active automation workflow.
 - `.github/workflows/bak/`: archived inactive workflows.
 

@@ -1,0 +1,605 @@
+{
+  "native_grid_recommendation": {
+    "recommended_label": "half_degree_cell_center",
+    "recommended_fraction_set": {
+      "latitude": [
+        0.5
+      ],
+      "longitude": [
+        0.5
+      ]
+    },
+    "reason": "Fresh CDS samples and current latest raw cache are consistently on 1-degree cell centers at .5, while baseline CSVs and baseline caches are legacy integer-grid outputs."
+  },
+  "groups": [
+    {
+      "label": "latest_csv",
+      "files": 3,
+      "fraction_patterns": [
+        {
+          "lat_fraction_set": [
+            0.5
+          ],
+          "lon_fraction_set": [
+            0.5
+          ],
+          "count": 3,
+          "example_path": "SEAS5\\latest\\init2026-01-01.csv"
+        }
+      ],
+      "point_count_patterns": [
+        {
+          "n_points": 6,
+          "count": 3
+        }
+      ],
+      "half_degree_centered_files": 3,
+      "integer_degree_centered_files": 0,
+      "sample_files": [
+        {
+          "path": "SEAS5\\latest\\init2026-01-01.csv",
+          "source_kind": "latest_csv",
+          "n_points": 6,
+          "lat_values": [
+            22.5,
+            23.5,
+            24.5
+          ],
+          "lon_values": [
+            120.5,
+            121.5
+          ],
+          "lat_fraction_set": [
+            0.5
+          ],
+          "lon_fraction_set": [
+            0.5
+          ],
+          "is_half_degree_centered": true,
+          "is_integer_degree_centered": false
+        },
+        {
+          "path": "SEAS5\\latest\\init2026-02-01.csv",
+          "source_kind": "latest_csv",
+          "n_points": 6,
+          "lat_values": [
+            22.5,
+            23.5,
+            24.5
+          ],
+          "lon_values": [
+            120.5,
+            121.5
+          ],
+          "lat_fraction_set": [
+            0.5
+          ],
+          "lon_fraction_set": [
+            0.5
+          ],
+          "is_half_degree_centered": true,
+          "is_integer_degree_centered": false
+        },
+        {
+          "path": "SEAS5\\latest\\init2026-03-01.csv",
+          "source_kind": "latest_csv",
+          "n_points": 6,
+          "lat_values": [
+            22.5,
+            23.5,
+            24.5
+          ],
+          "lon_values": [
+            120.5,
+            121.5
+          ],
+          "lat_fraction_set": [
+            0.5
+          ],
+          "lon_fraction_set": [
+            0.5
+          ],
+          "is_half_degree_centered": true,
+          "is_integer_degree_centered": false
+        }
+      ]
+    },
+    {
+      "label": "baseline_csv",
+      "files": 312,
+      "fraction_patterns": [
+        {
+          "lat_fraction_set": [
+            0.0
+          ],
+          "lon_fraction_set": [
+            0.0
+          ],
+          "count": 312,
+          "example_path": "SEAS5\\baseline\\2000\\01\\init2000-01-01.csv"
+        }
+      ],
+      "point_count_patterns": [
+        {
+          "n_points": 9,
+          "count": 68
+        },
+        {
+          "n_points": 11,
+          "count": 4
+        },
+        {
+          "n_points": 12,
+          "count": 240
+        }
+      ],
+      "half_degree_centered_files": 0,
+      "integer_degree_centered_files": 312,
+      "sample_files": [
+        {
+          "path": "SEAS5\\baseline\\2000\\01\\init2000-01-01.csv",
+          "source_kind": "baseline_csv",
+          "n_points": 12,
+          "lat_values": [
+            22.0,
+            23.0,
+            24.0,
+            25.0
+          ],
+          "lon_values": [
+            120.0,
+            121.0,
+            122.0
+          ],
+          "lat_fraction_set": [
+            0.0
+          ],
+          "lon_fraction_set": [
+            0.0
+          ],
+          "is_half_degree_centered": false,
+          "is_integer_degree_centered": true
+        },
+        {
+          "path": "SEAS5\\baseline\\2000\\02\\init2000-02-01.csv",
+          "source_kind": "baseline_csv",
+          "n_points": 12,
+          "lat_values": [
+            22.0,
+            23.0,
+            24.0,
+            25.0
+          ],
+          "lon_values": [
+            120.0,
+            121.0,
+            122.0
+          ],
+          "lat_fraction_set": [
+            0.0
+          ],
+          "lon_fraction_set": [
+            0.0
+          ],
+          "is_half_degree_centered": false,
+          "is_integer_degree_centered": true
+        },
+        {
+          "path": "SEAS5\\baseline\\2000\\03\\init2000-03-01.csv",
+          "source_kind": "baseline_csv",
+          "n_points": 12,
+          "lat_values": [
+            22.0,
+            23.0,
+            24.0,
+            25.0
+          ],
+          "lon_values": [
+            120.0,
+            121.0,
+            122.0
+          ],
+          "lat_fraction_set": [
+            0.0
+          ],
+          "lon_fraction_set": [
+            0.0
+          ],
+          "is_half_degree_centered": false,
+          "is_integer_degree_centered": true
+        }
+      ]
+    },
+    {
+      "label": "latest_cache_nc",
+      "files": 3,
+      "fraction_patterns": [
+        {
+          "lat_fraction_set": [
+            0.5
+          ],
+          "lon_fraction_set": [
+            0.5
+          ],
+          "count": 3,
+          "example_path": "SEAS5\\latest\\_cache_nc\\init2026-01-01_inst.nc"
+        }
+      ],
+      "point_count_patterns": [
+        {
+          "n_points": 6,
+          "count": 3
+        }
+      ],
+      "half_degree_centered_files": 3,
+      "integer_degree_centered_files": 0,
+      "sample_files": [
+        {
+          "path": "SEAS5\\latest\\_cache_nc\\init2026-01-01_inst.nc",
+          "source_kind": "latest_cache_nc",
+          "n_points": 6,
+          "lat_values": [
+            22.5,
+            23.5,
+            24.5
+          ],
+          "lon_values": [
+            120.5,
+            121.5
+          ],
+          "lat_fraction_set": [
+            0.5
+          ],
+          "lon_fraction_set": [
+            0.5
+          ],
+          "is_half_degree_centered": true,
+          "is_integer_degree_centered": false
+        },
+        {
+          "path": "SEAS5\\latest\\_cache_nc\\init2026-02-01_inst.nc",
+          "source_kind": "latest_cache_nc",
+          "n_points": 6,
+          "lat_values": [
+            22.5,
+            23.5,
+            24.5
+          ],
+          "lon_values": [
+            120.5,
+            121.5
+          ],
+          "lat_fraction_set": [
+            0.5
+          ],
+          "lon_fraction_set": [
+            0.5
+          ],
+          "is_half_degree_centered": true,
+          "is_integer_degree_centered": false
+        },
+        {
+          "path": "SEAS5\\latest\\_cache_nc\\init2026-03-01_inst.nc",
+          "source_kind": "latest_cache_nc",
+          "n_points": 6,
+          "lat_values": [
+            22.5,
+            23.5,
+            24.5
+          ],
+          "lon_values": [
+            120.5,
+            121.5
+          ],
+          "lat_fraction_set": [
+            0.5
+          ],
+          "lon_fraction_set": [
+            0.5
+          ],
+          "is_half_degree_centered": true,
+          "is_integer_degree_centered": false
+        }
+      ]
+    },
+    {
+      "label": "baseline_monthly_cache_nc",
+      "files": 240,
+      "fraction_patterns": [
+        {
+          "lat_fraction_set": [
+            0.0
+          ],
+          "lon_fraction_set": [
+            0.0
+          ],
+          "count": 240,
+          "example_path": "SEAS5\\baseline\\2000\\01\\_cache_nc\\init2000-01-01_inst.nc"
+        }
+      ],
+      "point_count_patterns": [
+        {
+          "n_points": 12,
+          "count": 240
+        }
+      ],
+      "half_degree_centered_files": 0,
+      "integer_degree_centered_files": 240,
+      "sample_files": [
+        {
+          "path": "SEAS5\\baseline\\2000\\01\\_cache_nc\\init2000-01-01_inst.nc",
+          "source_kind": "baseline_monthly_cache_nc",
+          "n_points": 12,
+          "lat_values": [
+            22.0,
+            23.0,
+            24.0,
+            25.0
+          ],
+          "lon_values": [
+            120.0,
+            121.0,
+            122.0
+          ],
+          "lat_fraction_set": [
+            0.0
+          ],
+          "lon_fraction_set": [
+            0.0
+          ],
+          "is_half_degree_centered": false,
+          "is_integer_degree_centered": true
+        },
+        {
+          "path": "SEAS5\\baseline\\2000\\02\\_cache_nc\\init2000-02-01_inst.nc",
+          "source_kind": "baseline_monthly_cache_nc",
+          "n_points": 12,
+          "lat_values": [
+            22.0,
+            23.0,
+            24.0,
+            25.0
+          ],
+          "lon_values": [
+            120.0,
+            121.0,
+            122.0
+          ],
+          "lat_fraction_set": [
+            0.0
+          ],
+          "lon_fraction_set": [
+            0.0
+          ],
+          "is_half_degree_centered": false,
+          "is_integer_degree_centered": true
+        },
+        {
+          "path": "SEAS5\\baseline\\2000\\03\\_cache_nc\\init2000-03-01_inst.nc",
+          "source_kind": "baseline_monthly_cache_nc",
+          "n_points": 12,
+          "lat_values": [
+            22.0,
+            23.0,
+            24.0,
+            25.0
+          ],
+          "lon_values": [
+            120.0,
+            121.0,
+            122.0
+          ],
+          "lat_fraction_set": [
+            0.0
+          ],
+          "lon_fraction_set": [
+            0.0
+          ],
+          "is_half_degree_centered": false,
+          "is_integer_degree_centered": true
+        }
+      ]
+    },
+    {
+      "label": "baseline_legacy_cache_nc",
+      "files": 292,
+      "fraction_patterns": [
+        {
+          "lat_fraction_set": [
+            0.0
+          ],
+          "lon_fraction_set": [
+            0.0
+          ],
+          "count": 292,
+          "example_path": "SEAS5\\baseline\\2020\\01\\_cache_nc\\lat22.500_lon120.500_init2020-01-01_inst.nc"
+        }
+      ],
+      "point_count_patterns": [
+        {
+          "n_points": 4,
+          "count": 292
+        }
+      ],
+      "half_degree_centered_files": 0,
+      "integer_degree_centered_files": 292,
+      "sample_files": [
+        {
+          "path": "SEAS5\\baseline\\2020\\01\\_cache_nc\\lat22.500_lon120.500_init2020-01-01_inst.nc",
+          "source_kind": "baseline_legacy_cache_nc",
+          "n_points": 4,
+          "lat_values": [
+            22.0,
+            23.0
+          ],
+          "lon_values": [
+            120.0,
+            121.0
+          ],
+          "lat_fraction_set": [
+            0.0
+          ],
+          "lon_fraction_set": [
+            0.0
+          ],
+          "is_half_degree_centered": false,
+          "is_integer_degree_centered": true
+        },
+        {
+          "path": "SEAS5\\baseline\\2020\\01\\_cache_nc\\lat22.500_lon121.500_init2020-01-01_inst.nc",
+          "source_kind": "baseline_legacy_cache_nc",
+          "n_points": 4,
+          "lat_values": [
+            22.0,
+            23.0
+          ],
+          "lon_values": [
+            121.0,
+            122.0
+          ],
+          "lat_fraction_set": [
+            0.0
+          ],
+          "lon_fraction_set": [
+            0.0
+          ],
+          "is_half_degree_centered": false,
+          "is_integer_degree_centered": true
+        },
+        {
+          "path": "SEAS5\\baseline\\2020\\01\\_cache_nc\\lat23.500_lon120.500_init2020-01-01_inst.nc",
+          "source_kind": "baseline_legacy_cache_nc",
+          "n_points": 4,
+          "lat_values": [
+            23.0,
+            24.0
+          ],
+          "lon_values": [
+            120.0,
+            121.0
+          ],
+          "lat_fraction_set": [
+            0.0
+          ],
+          "lon_fraction_set": [
+            0.0
+          ],
+          "is_half_degree_centered": false,
+          "is_integer_degree_centered": true
+        }
+      ]
+    },
+    {
+      "label": "cds_sample_nc",
+      "files": 3,
+      "fraction_patterns": [
+        {
+          "lat_fraction_set": [
+            0.5
+          ],
+          "lon_fraction_set": [
+            0.5
+          ],
+          "count": 3,
+          "example_path": "validation\\grid_audit\\cds_baseline_2011-06.nc"
+        }
+      ],
+      "point_count_patterns": [
+        {
+          "n_points": 6,
+          "count": 1
+        },
+        {
+          "n_points": 16,
+          "count": 1
+        },
+        {
+          "n_points": 20,
+          "count": 1
+        }
+      ],
+      "half_degree_centered_files": 3,
+      "integer_degree_centered_files": 0,
+      "sample_files": [
+        {
+          "path": "validation\\grid_audit\\cds_baseline_2011-06.nc",
+          "source_kind": "cds_sample_nc",
+          "n_points": 20,
+          "lat_values": [
+            21.5,
+            22.5,
+            23.5,
+            24.5,
+            25.5
+          ],
+          "lon_values": [
+            119.5,
+            120.5,
+            121.5,
+            122.5
+          ],
+          "lat_fraction_set": [
+            0.5
+          ],
+          "lon_fraction_set": [
+            0.5
+          ],
+          "is_half_degree_centered": true,
+          "is_integer_degree_centered": false
+        },
+        {
+          "path": "validation\\grid_audit\\cds_baseline_2025-01.nc",
+          "source_kind": "cds_sample_nc",
+          "n_points": 16,
+          "lat_values": [
+            21.5,
+            22.5,
+            23.5,
+            24.5
+          ],
+          "lon_values": [
+            119.5,
+            120.5,
+            121.5,
+            122.5
+          ],
+          "lat_fraction_set": [
+            0.5
+          ],
+          "lon_fraction_set": [
+            0.5
+          ],
+          "is_half_degree_centered": true,
+          "is_integer_degree_centered": false
+        },
+        {
+          "path": "validation\\grid_audit\\cds_latest_2026-01.nc",
+          "source_kind": "cds_sample_nc",
+          "n_points": 6,
+          "lat_values": [
+            22.5,
+            23.5,
+            24.5
+          ],
+          "lon_values": [
+            120.5,
+            121.5
+          ],
+          "lat_fraction_set": [
+            0.5
+          ],
+          "lon_fraction_set": [
+            0.5
+          ],
+          "is_half_degree_centered": true,
+          "is_integer_degree_centered": false
+        }
+      ]
+    }
+  ],
+  "action_items": [
+    "Keep latest workflow on half-degree cell-center coordinates (.5).",
+    "Do not use baseline cache_nc rebuild to recover native grid when the cache itself is integer-grid.",
+    "Rebuild baseline from CDS/native source for months still stored on integer-grid coordinates."
+  ]
+}

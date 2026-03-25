@@ -1,27 +1,35 @@
 #!/usr/bin/env python3
 """One-off baseline rebuild from existing local cache NetCDF files.
 
+Important safety note
+- This path is only safe when the cache NetCDF itself is already on the native
+  half-degree cell-center grid.
+- If the cache coordinates are legacy integer-grid outputs, rebuilding from
+  cache would preserve the wrong grid and should be refused.
+
 Goal
-- Rebuild baseline CSVs to native CDS grid without re-downloading.
+- Rebuild baseline CSVs from cache only when the cache itself is native.
 - Prefer monthly cache pair:
     _cache_nc/initYYYY-MM-01_inst.nc + initYYYY-MM-01_tp.nc
 - Fallback to legacy cache pairs:
     _cache_nc/*_initYYYY-MM-01_inst.nc + *_tp.nc
-
-This script is resumable by design:
-- native half-grid CSV already correct -> skip
-- legacy/non-native CSV -> rebuild from cache nc
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import sys
+import types
 from datetime import date
 from pathlib import Path
 from typing import List, Tuple
 
+import h5py
 import pandas as pd
+
+if 'cdsapi' not in sys.modules:
+    sys.modules['cdsapi'] = types.SimpleNamespace(Client=object)
 
 from seas5_build_monthly_baseline_timeboxed import (
     horizon_end_date,
@@ -56,6 +64,21 @@ def csv_is_native_half_grid(csv_path: Path) -> bool:
         for r in rd:
             lats.add(float(r["latitude"]))
             lons.add(float(r["longitude"]))
+    if not lats or not lons:
+        return False
+    lat_frac = sorted({round(v - int(v), 6) for v in lats})
+    lon_frac = sorted({round(v - int(v), 6) for v in lons})
+    return lat_frac == [0.5] and lon_frac == [0.5]
+
+
+def nc_is_native_half_grid(nc_path: Path) -> bool:
+    if (not nc_path.exists()) or nc_path.stat().st_size == 0:
+        return False
+    with h5py.File(nc_path, "r") as f:
+        if ("latitude" not in f) or ("longitude" not in f):
+            return False
+        lats = [float(v) for v in f["latitude"][...].tolist()]
+        lons = [float(v) for v in f["longitude"][...].tolist()]
     if not lats or not lons:
         return False
     lat_frac = sorted({round(v - int(v), 6) for v in lats})
@@ -111,8 +134,16 @@ def rebuild_one(y: int, m: int, overwrite: bool) -> str:
     if not pairs:
         return "missing_cache"
 
+    native_pairs = [
+        (inst_nc, tp_nc)
+        for inst_nc, tp_nc in pairs
+        if nc_is_native_half_grid(inst_nc) and nc_is_native_half_grid(tp_nc)
+    ]
+    if not native_pairs:
+        return "cache_non_native"
+
     frames: List[pd.DataFrame] = []
-    for inst_nc, tp_nc in pairs:
+    for inst_nc, tp_nc in native_pairs:
         try:
             d = to_daily_for_month(inst_nc, tp_nc, keep_members=False)
         except Exception:
@@ -135,7 +166,14 @@ def rebuild_one(y: int, m: int, overwrite: bool) -> str:
 
 def main() -> int:
     args = parse_args()
-    stats = {"rebuilt": 0, "skip_native": 0, "missing_cache": 0, "cache_unreadable": 0, "cache_empty": 0}
+    stats = {
+        "rebuilt": 0,
+        "skip_native": 0,
+        "missing_cache": 0,
+        "cache_non_native": 0,
+        "cache_unreadable": 0,
+        "cache_empty": 0,
+    }
 
     for y in range(args.start_year, args.end_year + 1):
         for m in range(1, 13):
