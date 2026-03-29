@@ -132,21 +132,39 @@ def build_report() -> dict:
         summarize_group("cds_sample_nc", cds_samples),
     ]
 
+    baseline_is_native = bool(baseline_csv) and all(s.is_half_degree_centered for s in baseline_csv)
+    baseline_cache_is_native = bool(baseline_monthly_cache) and all(s.is_half_degree_centered for s in baseline_monthly_cache)
+    legacy_cache_present = any(True for _ in baseline_legacy_cache)
+
+    if baseline_is_native and baseline_cache_is_native and (not legacy_cache_present):
+        reason = (
+            "Fresh CDS samples, current latest raw cache, rebuilt baseline CSVs, and rebuilt baseline monthly cache "
+            "are all consistently on 1-degree cell centers at .5."
+        )
+        action_items = [
+            "Keep latest workflow on half-degree cell-center coordinates (.5).",
+            "Baseline has already been rebuilt to the native half-degree cell-center grid.",
+            "Do not use legacy integer-grid cache files as a rebuild source if they reappear in future runs.",
+        ]
+    else:
+        reason = (
+            "Fresh CDS samples and current latest raw cache are consistently on 1-degree cell centers at .5, "
+            "while some baseline outputs or caches still indicate legacy integer-grid processing."
+        )
+        action_items = [
+            "Keep latest workflow on half-degree cell-center coordinates (.5).",
+            "Do not use baseline cache_nc rebuild to recover native grid when the cache itself is integer-grid.",
+            "Rebuild baseline from CDS/native source for months still stored on integer-grid coordinates.",
+        ]
+
     return {
         "native_grid_recommendation": {
             "recommended_label": "half_degree_cell_center",
             "recommended_fraction_set": {"latitude": [0.5], "longitude": [0.5]},
-            "reason": (
-                "Fresh CDS samples and current latest raw cache are consistently on 1-degree "
-                "cell centers at .5, while baseline CSVs and baseline caches are legacy integer-grid outputs."
-            ),
+            "reason": reason,
         },
         "groups": groups,
-        "action_items": [
-            "Keep latest workflow on half-degree cell-center coordinates (.5).",
-            "Do not use baseline cache_nc rebuild to recover native grid when the cache itself is integer-grid.",
-            "Rebuild baseline from CDS/native source for months still stored on integer-grid coordinates.",
-        ],
+        "action_items": action_items,
     }
 
 

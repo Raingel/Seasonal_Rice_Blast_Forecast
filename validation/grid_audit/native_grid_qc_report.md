@@ -3,7 +3,7 @@
 ## Recommendation
 - recommended native grid: `half_degree_cell_center`
 - expected fractions: lat=[0.5] lon=[0.5]
-- reason: Fresh CDS samples and current latest raw cache are consistently on 1-degree cell centers at .5, while baseline CSVs and baseline caches are legacy integer-grid outputs.
+- reason: Fresh CDS samples, current latest raw cache, rebuilt baseline CSVs, and rebuilt baseline monthly cache are all consistently on 1-degree cell centers at .5.
 
 ## latest_csv
 - files=3
@@ -14,12 +14,10 @@
 
 ## baseline_csv
 - files=312
-- half_degree_centered_files=0
-- integer_degree_centered_files=312
-- fractions lat=[0.0] lon=[0.0]: count=312 example=`SEAS5\baseline\2000\01\init2000-01-01.csv`
-- n_points=9: count=68
-- n_points=11: count=4
-- n_points=12: count=240
+- half_degree_centered_files=312
+- integer_degree_centered_files=0
+- fractions lat=[0.5] lon=[0.5]: count=312 example=`SEAS5\baseline\2000\01\init2000-01-01.csv`
+- n_points=6: count=312
 
 ## latest_cache_nc
 - files=3
@@ -29,18 +27,16 @@
 - n_points=6: count=3
 
 ## baseline_monthly_cache_nc
-- files=240
-- half_degree_centered_files=0
-- integer_degree_centered_files=240
-- fractions lat=[0.0] lon=[0.0]: count=240 example=`SEAS5\baseline\2000\01\_cache_nc\init2000-01-01_inst.nc`
-- n_points=12: count=240
+- files=312
+- half_degree_centered_files=312
+- integer_degree_centered_files=0
+- fractions lat=[0.5] lon=[0.5]: count=312 example=`SEAS5\baseline\2000\01\_cache_nc\init2000-01-01_inst.nc`
+- n_points=6: count=312
 
 ## baseline_legacy_cache_nc
-- files=292
+- files=0
 - half_degree_centered_files=0
-- integer_degree_centered_files=292
-- fractions lat=[0.0] lon=[0.0]: count=292 example=`SEAS5\baseline\2020\01\_cache_nc\lat22.500_lon120.500_init2020-01-01_inst.nc`
-- n_points=4: count=292
+- integer_degree_centered_files=0
 
 ## cds_sample_nc
 - files=3
@@ -53,5 +49,5 @@
 
 ## Action Items
 - Keep latest workflow on half-degree cell-center coordinates (.5).
-- Do not use baseline cache_nc rebuild to recover native grid when the cache itself is integer-grid.
-- Rebuild baseline from CDS/native source for months still stored on integer-grid coordinates.
+- Baseline has already been rebuilt to the native half-degree cell-center grid.
+- Do not use legacy integer-grid cache files as a rebuild source if they reappear in future runs.
